@@ -21,8 +21,9 @@
 # ql_tpc.py は、全ボードを通した N_trg の最大値から大きく戻ると新しい run とみなす。ボードごとに
 # ファイルの閉じる時刻がずれ、calltt と killua の分も別々に届くので、TPC の枠は次のように送る。
 #   1. ql_sync.sh が全ノードを 1 周同期するたびに更新する .ql_sync_done を見て、更新されたとき
-#      だけ新しいファイルを読む。.ql_sync_done が無ければ、新しいファイルが --settle 秒届かなく
-#      なってから送る
+#      だけ新しいファイルを読む。起動する前の .ql_sync_done は、同期の途中かもしれないので使わず、
+#      起動したあとの 1 周目が終わるまで待つ。ql_sync.sh を使わずにファイルを置いたときは、
+#      置き終えてから touch .ql_sync_done する
 #   2. 全ボードの分がそろった N_trg までを、N_trg の順に送る。前の run にあったボードは、
 #      この run でまだ届いていなくても待つ
 #   3. 止まったボードを待ち続けないよう、最新のファイルが他より --stale 秒以上古いボードと、
@@ -84,8 +85,6 @@ def parse_args():
     parser.add_argument("--thin", type=int, default=450,
                         help="send triggers whose N_trg is a multiple of this [triggers]")
     parser.add_argument("--poll", type=float, default=5.0, help="interval to look for new files [s]")
-    parser.add_argument("--settle", type=float, default=10.0,
-                        help="wait this long after the last new file before sending TPC frames [s]")
     parser.add_argument("--stale", type=float, default=120.0,
                         help="do not wait for boards whose files are this much older [s]")
     parser.add_argument("--history-mb", type=float, default=256.0,
@@ -210,7 +209,8 @@ class Follower:
         self.run_id = None
         self.expected = set()       # 前の run にあったボード。この run でも待つ
         self.marker_mtime = None
-        self.synced = False         # .ql_sync_done を見て読むか
+        self.started = time.time()  # これより前の .ql_sync_done は使わない
+        self.waiting = False        # 1 周目の同期を待っていることを表示したか
         self.skip_existing = not args.from_start   # 起動したときの run は、届いている分を読み飛ばす
         self.reset()
 
@@ -226,15 +226,21 @@ class Follower:
     def scan(self):
         """新しいファイルを読み、送ってよい枠を [(側, 番号, 枠)] で返す。run が変われば True も返す。"""
 
-        # 同期の途中で読むと、片方のノードの分だけを先に送ってしまう。1 周終わるまで読まない
+        # 同期の途中で読むと、送られてきた順 (ファイルの名前の順) に 1 つずつ表示されたり、片方の
+        # ノードの分だけを先に送ったりする。1 周終わるまで読まない
         marker = os.path.join(self.args.data_dir, SYNC_MARKER)
-        self.synced = os.path.exists(marker)
+        mtime = os.path.getmtime(marker) if os.path.exists(marker) else None
 
-        if self.synced:
-            mtime = os.path.getmtime(marker)
-            if mtime == self.marker_mtime:
-                return self.release_tpc(), False
-            self.marker_mtime = mtime
+        if mtime is None or mtime < self.started:
+            if not self.waiting:
+                self.waiting = True
+                print(f"[WAIT] waiting for ql_sync.sh to finish a round ({marker})", flush=True)
+            return [], False
+
+        if mtime == self.marker_mtime:
+            return self.release_tpc(), False
+
+        self.marker_mtime = mtime
 
         run_id = self.args.run or newest_run(self.args.data_dir)
         switched = run_id != self.run_id
@@ -346,9 +352,6 @@ class Follower:
 
         now = time.monotonic()
         quiet = now - self.last_new_file
-
-        if not self.synced and quiet < self.args.settle:
-            return []
 
         if quiet >= self.args.stale:
             limit = float("inf")
