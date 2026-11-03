@@ -1,7 +1,7 @@
 # SMILE-3 QL
 
-Storage Node（calltt, killua）が書いている run から TPC と HA（PSA）の QL を出し、あわせて
-全データを QL 用 PC へ同期する。
+Storage Node（calltt, killua）が書いている run から TPC と HA（PSA）の QL を出す。全データを
+QL 用 PC へ同期するコマンドは別にある。
 
 ```
 calltt / killua                                QL 用 PC
@@ -12,19 +12,27 @@ calltt / killua                                QL 用 PC
   /data/smile_ics/storage_gX ──ql_sync.sh（全データ）──▶ ~/smile_ics_ql/storage_gX/<run>/
 ```
 
-QL はノード側で間引いた分（既定 450 分の 1）だけを受けるので、全データの同期を待たず、
-数秒の遅れで更新される。全データの同期は裏で続く。
+QL はノード側で間引いた分（既定 450 分の 1）だけを受けるので、数秒の遅れで更新される。
+全データの同期とは独立に動く。
 
 ## 使い方
 
 ```bash
 cd ~/analysis_sm3_FM
-./ql_live.sh                    # QL と全データの同期をまとめて起動する。Ctrl-C で全部止まる
-./ql_live.sh --since 20261101   # この日付より前の run は同期しない
-QL_SYNC=0 ./ql_live.sh          # QL だけ出し、全データの同期はしない
-QL_FOLLOW_ARGS=--from-start ./ql_live.sh   # 今の run を最初から積算する
-./ql_sync.sh --watch            # 同期だけ
+./ql_live.sh                    # QL を起動する。Ctrl-C で全部止まる
+./ql_live.sh --from-start       # 今の run を最初から積算する
 ```
+
+全データの同期は、別のターミナルで実行する。
+
+```bash
+./ql_sync.sh --watch                  # 30 秒ごとに同期し続ける
+./ql_sync.sh --watch --since 20261101 # この日付より前の run は同期しない
+./ql_sync.sh                          # 1 回だけ同期する
+```
+
+同期先は `QL_DEST`（既定 `~/smile_ics_ql`）で変える。全データの同期はノードと回線への負荷が
+大きいので、RUN 中に要らなければ RUN の合間に 1 回だけ実行する。
 
 起動したときに走っている run は、起動した時点から積算する。そのあとに始まった run は
 最初から積算する。
@@ -36,7 +44,7 @@ QL_FOLLOW_ARGS=--from-start ./ql_live.sh   # 今の run を最初から積算す
 
 | ファイル | 役割 |
 | --- | --- |
-| `ql_live.sh` | 下をまとめて起動する |
+| `ql_live.sh` | `ql_stream.py`、`ql_tpc.py`、`ql_psa.py` をまとめて起動する |
 | `TPC_analysis/ql_stream.py` | 各ノードで `ql_feed.py` を ssh で動かし、間引いたイベントを合わせて流す |
 | `TPC_analysis/ql_feed.py` | ノード側で run のファイルを追いかけて間引く。ssh で渡すのでノードに置かなくてよい |
 | `TPC_analysis/ql_tpc.py` | TPC の QL |
