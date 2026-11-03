@@ -226,6 +226,18 @@ class Follower:
     def scan(self):
         """新しいファイルを読み、送ってよい枠を [(側, 番号, 枠)] で返す。run が変われば True も返す。"""
 
+        # 起動したときに届いている分は、すぐに位置だけ覚えて読み飛ばす。1 周目の同期が終われば、
+        # 起動したあとに増えた分から表示できる。同期先が空なら、1 周目の後で読み飛ばす
+        # ql_sync.sh は転送の前に run のディレクトリを作るので、中身が無ければ空とみなす
+        if self.skip_existing:
+            run_id = self.args.run or newest_run(self.args.data_dir)
+            directories = sorted(glob.glob(os.path.join(self.args.data_dir, "*", run_id or "")))
+            if run_id is not None and self.received_bytes(directories) > 0:
+                self.skip_existing = False
+                self.run_id = run_id
+                print(f"[RUN] None -> {run_id}", flush=True)
+                self.skip_to_end(directories, run_id)
+
         # 同期の途中で読むと、送られてきた順 (ファイルの名前の順) に 1 つずつ表示されたり、片方の
         # ノードの分だけを先に送ったりする。1 周終わるまで読まない
         marker = os.path.join(self.args.data_dir, SYNC_MARKER)
@@ -330,6 +342,19 @@ class Follower:
 
         print(f"[SKIP] {run_id}: skip {n_files} files ({n_bytes / 1e6:.1f} MB) already received. "
               "use --from-start to read them", flush=True)
+
+    def received_bytes(self, directories):
+        """directories に届いている TPC と HA のファイルの合計の大きさ。"""
+
+        total = 0
+
+        for directory in directories:
+            for name in os.listdir(directory):
+                base = name[:-len(WRITING_SUFFIX)] if name.endswith(WRITING_SUFFIX) else name
+                if FILE_PATTERN.search(base) or HA_PATTERN.search(base):
+                    total += os.path.getsize(os.path.join(directory, name))
+
+        return total
 
     @staticmethod
     def data_files(directory):
