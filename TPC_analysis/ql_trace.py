@@ -19,6 +19,8 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 
+from ql_stream import die_with_parent
+
 
 PACKET_HEAD = struct.Struct(">IBBHI")
 PACKET_TAIL = struct.Struct(">I")
@@ -48,8 +50,8 @@ async def open_source(args):
     node, process_id = args.node.rsplit(":", 1)
     process = await asyncio.create_subprocess_exec(
         "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", node,
-        f"nice -n 10 python3 - --root {args.root}/{process_id} --debug",
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+        f"nice -n 19 ionice -c3 python3 - --root {args.root}/{process_id} --debug",
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, preexec_fn=die_with_parent)
     process.stdin.write(FEED_SCRIPT.read_bytes())
     await process.stdin.drain()
     process.stdin.close()

@@ -12,12 +12,16 @@
 # 進みが --stale 秒止まったボードは待たない。run が始まって全ノードの進みがそろうまでも待つが、
 # --stale 秒たてば待たない。HA は ql_psa.py が HA ごとに判定するので、届いた順に送る。
 #
+# ノードの ql_feed.py は、CPU とディスクの読み出しをどちらも最低の優先度 (nice 19, ionice idle) で
+# 動かし、DAQ を妨げない。ノードが忙しいときは QL の方が遅れる。
 # ノードには ~/.ssh/config の Host 名でつなぐ (ql_sync.sh と同じ。magallan を ProxyJump で経由する)。
 # 接続が切れたら --reconnect 秒ごとにつなぎ直す。
 #
 
 import argparse
 import asyncio
+import ctypes
+import signal
 import struct
 import time
 from pathlib import Path
@@ -30,6 +34,17 @@ PACKET_HEAD = struct.Struct(">IBBHI")
 PACKET_TAIL = struct.Struct(">I")
 
 FEED_SCRIPT = Path(__file__).resolve().parent / "ql_feed.py"
+
+
+def die_with_parent():
+    """起動する ssh に、親 (このプロセス) が終わったら自分も終わるよう Linux に頼む。
+
+    ssh が残ると、ノードの ql_feed.py も動き続ける。Ctrl-C だけでなく、kill されたり落ちたりした
+    ときにも ssh が残らないようにする。
+    """
+
+    PR_SET_PDEATHSIG = 1
+    ctypes.CDLL(None, use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
 
 
 def parse_args():
@@ -136,7 +151,7 @@ class Merger:
 async def follow_node(node, process_id, merger, args, script):
     """ノードで ql_feed.py を動かし、届いたパケットを merger に渡す。切れたらつなぎ直す。"""
 
-    command = (f"nice -n 10 python3 - --root {args.root}/{process_id} --thin {args.thin} "
+    command = (f"nice -n 19 ionice -c3 python3 - --root {args.root}/{process_id} --thin {args.thin} "
                f"--poll {args.poll}" + (" --from-start" if args.from_start else ""))
     # つなぎ直したときに最初から送り直さないよう、--from-start は最初の 1 回だけにする
     first = True
@@ -147,7 +162,7 @@ async def follow_node(node, process_id, merger, args, script):
             "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=10",
             node, command if first else command.replace(" --from-start", ""),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE)
+            stderr=asyncio.subprocess.PIPE, preexec_fn=die_with_parent)
         first = False
 
         process.stdin.write(script)
