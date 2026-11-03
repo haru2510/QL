@@ -1,0 +1,24 @@
+# QL に要るファイルだけを管理する。ほかの解析コードやデータは入れない
+/*
+!/.gitignore
+!/README.md
+!/ql_sync.sh
+!/ql_live.sh
+
+!/TPC_analysis/
+/TPC_analysis/*
+!/TPC_analysis/check_tpc.py
+!/TPC_analysis/ql_tpc.py
+!/TPC_analysis/ql_replay.py
+!/TPC_analysis/ql_follow.py
+
+!/PSA_analysis/
+/PSA_analysis/*
+!/PSA_analysis/src_onoda/
+/PSA_analysis/src_onoda/*
+!/PSA_analysis/src_onoda/ql_psa.py
+!/PSA_analysis/src_onoda/psa_decode.py
+!/PSA_analysis/src_onoda/check_data.py
+!/PSA_analysis/src_onoda/sub_scr/
+/PSA_analysis/src_onoda/sub_scr/*
+!/PSA_analysis/src_onoda/sub_scr/get_info.py
