@@ -174,6 +174,10 @@ class Feed:
         self.offsets = {}   # {X.raw のパス: 読み終えたバイト数}。X.raw.tmp もこのパスで覚える
         self.resync = set()
         self.last = {}      # {(側, ボード番号): 読み終えた最後の N_trg}
+        # 閉じて読み終えたファイル (.tmp を外した名前)。もう増えないので、次からは開かない。
+        # 1 つの run に何万ファイルもあるので、毎回すべてを開き直すとノードの負担になる
+        self.done = set()
+        self.kinds = {}     # {ディレクトリの中の名前: .tmp を外した名前。TPC と HA 以外は None}
 
     def newest_run(self):
 
@@ -183,15 +187,18 @@ class Feed:
         return max(names) if names else None
 
     def data_files(self, directory):
+        """まだ読み終えていない TPC と HA のファイルの名前を、.tmp を外した形で名前の順に返す。"""
 
-        names = set()
+        names = os.listdir(directory)
 
-        for name in os.listdir(directory):
-            base = name[:-len(WRITING_SUFFIX)] if name.endswith(WRITING_SUFFIX) else name
-            if TPC_PATTERN.search(base) or HA_PATTERN.search(base):
-                names.add(base)
+        for name in names:
+            if name not in self.kinds:
+                base = name[:-len(WRITING_SUFFIX)] if name.endswith(WRITING_SUFFIX) else name
+                self.kinds[name] = base if TPC_PATTERN.search(base) or HA_PATTERN.search(base) else None
 
-        return sorted(names, key=natural_key)
+        bases = {self.kinds[name] for name in names} - {None} - self.done
+
+        return sorted(bases, key=natural_key)
 
     def poll(self):
 
@@ -209,9 +216,11 @@ class Feed:
             if self.skip_existing:
                 for name in self.data_files(directory):
                     path = os.path.join(directory, name)
-                    actual = path if os.path.exists(path) else path + WRITING_SUFFIX
+                    if os.path.exists(path):
+                        self.done.add(name)
+                        continue
                     try:
-                        self.offsets[path] = os.path.getsize(actual)
+                        self.offsets[path] = os.path.getsize(path + WRITING_SUFFIX)
                     except FileNotFoundError:
                         continue
                     self.resync.add(path)
@@ -223,18 +232,21 @@ class Feed:
         for name in self.data_files(directory):
 
             path = os.path.join(directory, name)
-            actual = path if os.path.exists(path) else path + WRITING_SUFFIX
+            closed = os.path.exists(path)
+            actual = path if closed else path + WRITING_SUFFIX
             offset = self.offsets.get(path, 0)
 
             try:
+                size = os.path.getsize(actual)
+                if size <= offset:
+                    if closed:
+                        self.done.add(name)
+                    continue
                 with open(actual, "rb") as handle:
                     handle.seek(offset)
                     data = handle.read()
             except FileNotFoundError:
                 # 読もうとした間に .tmp が閉じて名前が変わった。次に読む
-                continue
-
-            if not data:
                 continue
 
             match = TPC_PATTERN.search(name)
