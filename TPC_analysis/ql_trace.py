@@ -64,7 +64,7 @@ async def run(args):
     latest = {}
     counts = defaultdict(int)
     recent = defaultdict(lambda: deque(maxlen=4))   # {枠の種類: 直前の (時刻, trig)}
-    reads = deque(maxlen=12)                         # 直前に読んだファイル (--node のとき)
+    reads = defaultdict(lambda: deque(maxlen=8))     # {枠の種類: そのファイルを直前に読んだ様子} (--node のとき)
     drops = 0
 
     print(f"[TRACE] {args.port and f'port {args.port}' or args.node}, {args.seconds:g} s", flush=True)
@@ -81,7 +81,10 @@ async def run(args):
             now = time.monotonic() - started
 
             if side == "d":
-                reads.append(f"{now:6.1f} s  {payload.decode()}")
+                name = payload.decode().split()[0]
+                tpc = name.startswith("tpc_enc_")
+                kind = f"{name[8]}{name[9:11]}" if tpc else f"h{name[2:4]}"
+                reads[kind].append(f"{now:6.1f} s  {payload.decode()}")
                 continue
             if side == "r":
                 print(f"{now:6.1f} s  run {payload.decode()}", flush=True)
@@ -100,8 +103,9 @@ async def run(args):
                     history = ", ".join(f"{t:.1f} s {v}" for t, v in recent[key])
                     print(f"{now:6.1f} s  {key}: {latest[key]} -> {trig} (差 {latest[key] - trig})"
                           f"  直前: {history}", flush=True)
-                    for line in reads:
-                        print(f"           読んだファイル: {line}", flush=True)
+                    for line in reads[key]:
+                        print(f"           {key} のファイルを読んだ: {line}  (名前 読み始め 読んだ量 閉じていたか)",
+                              flush=True)
 
             latest[key] = max(latest.get(key, trig), trig)
             recent[key].append((now, trig))
