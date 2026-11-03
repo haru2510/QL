@@ -7,8 +7,8 @@
 #
 # ブラウザには次の 3 枚を、モニターに収まるように並べる。
 #   1 イベントの図 : 飛跡と FADC 波形。--event-update ごとに最新のイベントへ更新
-#   レートの図     : カウントレートと FADC ベースライン
-#   積算の図       : 飛跡の積算画像。上の段が uPIC 0-3 の anode、下の段が cathode
+#   レートの図     : カウントレート、FADC ベースライン、dE/dx (全 uPIC の飛跡長とアノード電荷の 2 次元図)
+#   積算の図       : 飛跡の積算画像。上の段が uPIC 0-3 の anode、下の段が cathode。画面の大半を使う
 #
 # 1 イベントの図の色は、x が N 側 (uPIC 0, 3) 赤・S 側 (1, 2) 青、
 # y が E 側 (uPIC 0, 1) 赤・W 側 (2, 3) 青。FADC は 1 ch あたり 32 ストリップなので、
@@ -57,10 +57,10 @@ from check_tpc import (
     add_analysis_args,
     decode_file,
     N_UPIC,
-    draw_baseline,
     draw_rate,
     measure_tracks,
     save_figure,
+    track_lengths,
 )
 
 
@@ -95,7 +95,7 @@ VIEW_PAGE = """<!DOCTYPE html>
 <title>TPC QL</title>
 <style>
 html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
-body { display: grid; height: 100vh; grid-template-columns: 1fr 1fr; grid-template-rows: 32vh 68vh; }
+body { display: grid; height: 100vh; grid-template-columns: 42fr 58fr; grid-template-rows: 26vh 74vh; }
 img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
 #summary { grid-column: 1 / 3; }
 #status { position: fixed; right: 8px; bottom: 4px; font: 12px sans-serif; color: #555; }
@@ -336,14 +336,105 @@ def draw_event_figure(frames, trig, out_path, args):
     save_figure(fig, out_path)
 
 
-def draw_stats_figure(boards, title, out_path, args):
-    """カウントレートと FADC ベースラインを描く。"""
+def draw_dedx(ax, boards, args):
+    """全 uPIC の dE/dx (飛跡長とアノード電荷の 2 次元図) を描く。check_tpc.py の 5 段目と同じ計算。"""
 
-    fig = Figure(figsize=(12, 3.6), constrained_layout=True)
-    ax_rate, ax_base = fig.subplots(1, 2)
+    lengths = []
+    charges = []
+
+    for upic in range(N_UPIC):
+        selected = {
+            side: [(offset, boards[(side, upic * N_BOARDS_PER_UPIC + offset)])
+                   for offset in range(N_BOARDS_PER_UPIC)
+                   if (side, upic * N_BOARDS_PER_UPIC + offset) in boards]
+            for side in "ac"
+        }
+        _, length, charge = track_lengths(selected, args)
+        lengths.append(length)
+        charges.append(charge)
+
+    length = np.concatenate(lengths)
+    charge = np.concatenate(charges)
+    counts, x_edges, y_edges = np.histogram2d(charge, length, bins=100,
+                                              range=[[0, args.dedx_q_max], [0, args.length_max]])
+
+    if counts.max() > 0:
+        ax.pcolormesh(x_edges, y_edges, np.ma.masked_equal(counts.T, 0), norm=LogNorm(vmin=1),
+                      cmap="viridis")
+
+    ax.set_xlim(0, args.dedx_q_max)
+    ax.set_ylim(0, args.length_max)
+    ax.set_title(f"dE/dx (all uPIC, {len(length)} tracks)")
+    ax.set_xlabel("anode charge [ADU x sample]")
+    ax.set_ylabel("track length [mm]")
+
+
+def draw_baselines(ax_cathode, ax_anode, boards):
+    """FADC の ch ごとのベースラインの中央値と標準偏差を、cathode (上) と anode (下) に分けて描く。
+
+    ベースラインは 1-2 ADC の幅に集まるので、ADC ごとのヒストグラムにすると線が 1 画素より細くなり、
+    多くの ch が描かれずに抜けて見える。そのため ch ごとの代表値で描く。値の無い ch は灰色の x にする。
+    """
+
+    n_ch = N_UPIC * N_BOARDS_PER_UPIC * N_FADC_CH
+    adc = np.arange(FADC_MAX + 1)
+
+    for ax, side, name in ((ax_cathode, "c", "cathode"), (ax_anode, "a", "anode")):
+
+        medians = np.full(n_ch, np.nan)
+        spreads = np.full(n_ch, np.nan)
+
+        for (board_side, index), board in boards.items():
+            if board_side != side or index >= N_UPIC * N_BOARDS_PER_UPIC:
+                continue
+            for ch in range(N_FADC_CH):
+                counts = board["baseline"][ch].astype(np.float64)
+                if counts.sum() == 0:
+                    continue
+                cumulative = np.cumsum(counts)
+                medians[index * N_FADC_CH + ch] = adc[np.searchsorted(cumulative, cumulative[-1] / 2)]
+                mean = (adc * counts).sum() / counts.sum()
+                spreads[index * N_FADC_CH + ch] = np.sqrt((counts * (adc - mean) ** 2).sum() / counts.sum())
+
+        positions = np.arange(n_ch)
+        found = ~np.isnan(medians)
+        ax.errorbar(positions[found], medians[found], yerr=spreads[found], fmt="o", markersize=2.5,
+                    capsize=1.5, linewidth=0.8, color="tab:orange" if side == "c" else "tab:blue")
+
+        if found.any():
+            low, high = np.nanmin(medians - spreads), np.nanmax(medians + spreads)
+            margin = max(5.0, 0.15 * (high - low))
+            ax.set_ylim(low - margin, high + margin)
+        ax.plot(positions[~found], np.full((~found).sum(), ax.get_ylim()[0]), "x", color="0.6",
+                markersize=4, clip_on=False)
+
+        # uPIC の境目に線を引き、目盛りは uPIC ごとに 1 つにする
+        per_upic = N_BOARDS_PER_UPIC * N_FADC_CH
+        for upic in range(1, N_UPIC):
+            ax.axvline(upic * per_upic - 0.5, color="0.8", linewidth=0.8)
+        ax.set_xlim(-0.5, n_ch - 0.5)
+        ax.set_xticks([upic * per_upic + (per_upic - 1) / 2 for upic in range(N_UPIC)],
+                      [f"uPIC{upic}" for upic in range(N_UPIC)])
+        ax.set_ylabel(f"{name} [ADC]")
+
+    ax_cathode.set_title(f"FADC baseline (median, std; x: no data, {N_FADC_CH} ch x 3 boards per uPIC)",
+                         fontsize=10)
+    ax_cathode.tick_params(labelbottom=False)
+
+
+def draw_stats_figure(boards, title, out_path, args):
+    """カウントレート、FADC ベースライン、dE/dx を描く。"""
+
+    fig = Figure(figsize=(16, 3.6), constrained_layout=True)
+    grid = fig.add_gridspec(2, 3)
+    ax_rate = fig.add_subplot(grid[:, 0])
+    ax_cathode = fig.add_subplot(grid[0, 1])
+    ax_anode = fig.add_subplot(grid[1, 1], sharex=ax_cathode)
+    ax_dedx = fig.add_subplot(grid[:, 2])
 
     draw_rate(ax_rate, boards, args, rate_curve=thinned_rate)
-    draw_baseline(fig, ax_base, boards)
+    draw_baselines(ax_cathode, ax_anode, boards)
+    draw_dedx(ax_dedx, boards, args)
     fig.suptitle(title, fontsize=10)
 
     save_figure(fig, out_path)
@@ -352,8 +443,9 @@ def draw_stats_figure(boards, title, out_path, args):
 def draw_summary_figure(boards, out_path, args):
     """飛跡の積算画像を描く。上の段が uPIC 0-3 の anode、下の段が cathode。"""
 
-    fig = Figure(figsize=(20, 8.4), constrained_layout=True)
-    axes = fig.subplots(2, N_UPIC)
+    # 画面の下段いっぱいに大きく出すので、軸の名前は外側の図だけに付けて余白を減らす
+    fig = Figure(figsize=(20, 8.3), constrained_layout=True)
+    axes = fig.subplots(2, N_UPIC, sharex=True, sharey=True)
 
     for row, side in enumerate("ac"):
         for upic in range(N_UPIC):
@@ -375,8 +467,10 @@ def draw_summary_figure(boards, out_path, args):
             ax.set_xlim(-0.5, N_BOARDS_PER_UPIC * N_STRIPS - 0.5)
             ax.set_ylim(-0.5, N_CLOCKS - 0.5)
             ax.set_title(f"uPIC{upic} {'anode' if side == 'a' else 'cathode'}")
-            ax.set_xlabel("strip")
-            ax.set_ylabel("clock")
+            if row == 1:
+                ax.set_xlabel("strip")
+            if upic == 0:
+                ax.set_ylabel("clock")
 
     save_figure(fig, out_path)
 
