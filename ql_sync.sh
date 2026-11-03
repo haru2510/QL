@@ -14,6 +14,7 @@
 #   - Storage Node で消えたファイルは消さない（collect_runs.sh の削除に追従しない）
 #   - --since（または QL_SINCE）を付けると、run ID（YYYYMMDD_runNN）の日付がそれより前の run は
 #     送らない。metrics など run 以外のディレクトリは常に送る
+#   - 毎回、各ノードのいちばん新しい run を先に送り、そのあとで過去の run と metrics を送る
 #   - Storage Node 側の rsync は nice / ionice で優先度を下げ、DAQ の書き込みを妨げない
 #
 # QL 用 PC（192.168.1.x）は検出器ネットワーク（192.168.100.x）に直接届かないので、両方に
@@ -84,33 +85,19 @@ flock -n 9 || die "別の ql_sync.sh が動いている"
 
 SSH_CMD="ssh -o BatchMode=yes -o ConnectTimeout=10"
 
-# 1 ノード分を同期し、1 行で結果を出す
-sync_node() {
-  local node=$1 process_id=$2 listing name out status files size
+# rsync を 1 回走らせ、1 行で結果を出す
+run_rsync() {
+  local label=$1 node=$2 src=$3 dest=$4 out status files size
+  shift 4
   local opts=(-a --stats --exclude='*.tmp' -e "$SSH_CMD"
-              --rsync-path='nice -n 19 ionice -c3 rsync')
+              --rsync-path='nice -n 19 ionice -c3 rsync' "$@")
   [ "$DRY_RUN" -eq 1 ] && opts+=(--dry-run --itemize-changes)
 
-  # --since: ノードの run を一覧し、日付が古い run を除外する。一覧に失敗したら、全 run を
-  # 送ってしまわないよう、このノードは飛ばす
-  if [ -n "$QL_SINCE" ]; then
-    if ! listing=$($SSH_CMD "$node" "ls -1 '$SRC_ROOT/$process_id'" 2>&1 </dev/null); then
-      printf '  %-10s %s: 失敗 (run の一覧を取れない)\n' "$process_id" "$node"
-      printf '%s\n' "$listing" | head -3 | sed 's/^/    /'
-      return 1
-    fi
-    while read -r name; do
-      [[ $name =~ ^([0-9]{8})_run ]] && [ "${BASH_REMATCH[1]}" \< "$QL_SINCE" ] \
-        && opts+=(--exclude "/$name/")
-    done <<<"$listing"
-  fi
-
-  mkdir -p "$QL_DEST/$process_id"
-  out=$(rsync "${opts[@]}" "$node:$SRC_ROOT/$process_id/" "$QL_DEST/$process_id/" 2>&1 </dev/null) \
-    && status=0 || status=$?
+  mkdir -p "$dest"
+  out=$(rsync "${opts[@]}" "$node:$src" "$dest" 2>&1 </dev/null) && status=0 || status=$?
   # 24 は転送中に元のファイルが消えた場合（collect_runs.sh の削除など）。次回で揃うので失敗にしない
   if [ "$status" -ne 0 ] && [ "$status" -ne 24 ]; then
-    printf '  %-10s %s: 失敗 (rsync %d)\n' "$process_id" "$node" "$status"
+    printf '  %-26s %s: 失敗 (rsync %d)\n' "$label" "$node" "$status"
     printf '%s\n' "$out" | grep -E '^(rsync|ssh)[: ]|No such|denied|refused|timed out|resolve' \
       | head -3 | sed 's/^/    /'
     return 1
@@ -118,15 +105,61 @@ sync_node() {
   [ "$DRY_RUN" -eq 1 ] && printf '%s\n' "$out" | grep '^>f' | sed 's/^/    /'
   files=$(printf '%s\n' "$out" | sed -n 's/^Number of regular files transferred: //p')
   size=$(printf '%s\n' "$out" | sed -n 's/^Total transferred file size: //p')
-  printf '  %-10s %s: %s files, %s\n' "$process_id" "$node" "${files:-0}" "${size:-0 bytes}"
+  printf '  %-26s %s: %s files, %s\n' "$label" "$node" "${files:-0}" "${size:-0 bytes}"
 }
 
+# ノードの run を一覧し、LATEST（いちばん新しい run）と EXCLUDES（--since より古い run）を決める
+list_runs() {
+  local node=$1 process_id=$2 listing name
+  LATEST=
+  EXCLUDES=()
+  if ! listing=$($SSH_CMD "$node" "ls -1 '$SRC_ROOT/$process_id'" 2>&1 </dev/null); then
+    printf '  %-26s %s: 失敗 (run の一覧を取れない)\n' "$process_id" "$node"
+    printf '%s\n' "$listing" | head -3 | sed 's/^/    /'
+    return 1
+  fi
+  while read -r name; do
+    [[ $name =~ ^([0-9]{8})_run[0-9]+$ ]] || continue
+    if [ -n "$QL_SINCE" ] && [ "${BASH_REMATCH[1]}" \< "$QL_SINCE" ]; then
+      EXCLUDES+=(--exclude "/$name/")
+    elif [ -z "$LATEST" ] || [ "$LATEST" \< "$name" ]; then
+      LATEST=$name
+    fi
+  done <<<"$listing"
+}
+
+# 1 周分の同期。QL がすぐ出るよう、まず各ノードのいちばん新しい run だけを送って ql_follow.py に
+# 知らせ、そのあとで残り（過去の run と metrics）を送る。初回に過去の run が多くても QL は待たない
 sync_once() {
-  local entry rc=0
+  local entry node process_id rc=0
+  local -A latest=() excludes=() listed=()
   printf '[%s] %s へ同期%s\n' "$(date '+%F %T')" "$QL_DEST" "${QL_SINCE:+（$QL_SINCE 以降の run）}"
+
   for entry in $QL_NODES; do
-    sync_node "${entry%:*}" "${entry##*:}" || rc=1
+    node=${entry%:*}
+    process_id=${entry##*:}
+    # 一覧に失敗したノードは、古い run まで送ってしまわないよう、この周は飛ばす
+    list_runs "$node" "$process_id" || { rc=1; continue; }
+    listed[$entry]=1
+    latest[$entry]=$LATEST
+    # 除外が無いときに printf '%q ' が空の引数 '' を作らないよう、あるときだけ書き出す
+    excludes[$entry]=
+    [ ${#EXCLUDES[@]} -eq 0 ] || excludes[$entry]=$(printf '%q ' "${EXCLUDES[@]}")
+    [ -n "$LATEST" ] || continue
+    run_rsync "$process_id/$LATEST" "$node" "$SRC_ROOT/$process_id/$LATEST/" \
+      "$QL_DEST/$process_id/$LATEST/" || rc=1
   done
+  [ "$DRY_RUN" -eq 1 ] || touch "$QL_DEST/.ql_sync_done"
+
+  for entry in $QL_NODES; do
+    [ -n "${listed[$entry]:-}" ] || continue
+    node=${entry%:*}
+    process_id=${entry##*:}
+    eval "EXCLUDES=(${excludes[$entry]})"
+    run_rsync "$process_id（残り）" "$node" "$SRC_ROOT/$process_id/" "$QL_DEST/$process_id/" \
+      --exclude "/${latest[$entry]:-.}/" ${EXCLUDES[@]+"${EXCLUDES[@]}"} || rc=1
+  done
+
   df -h "$QL_DEST" | tail -1 | awk '{printf "  空き容量 %s / %s (%s 使用)\n", $4, $2, $5}'
   # 全ノードを 1 周したことを ql_follow.py に知らせる。dry-run では何も届いていないので触らない
   [ "$DRY_RUN" -eq 1 ] || touch "$QL_DEST/.ql_sync_done"
