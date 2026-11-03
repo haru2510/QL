@@ -2,9 +2,15 @@
 #
 # QL 用 PC に同期した run のファイルを見張り、間引いたイベントを ql_tpc.py / ql_psa.py へ流す。
 #
-# ql_sync.sh が Storage Node から run を同期し、閉じたファイル (tpc_enc_*.raw, haNN_*.dat) から
-# 順に届く。この送信器は新しく届いたファイルを読み、ql_replay.py と同じ形式で、つないできた
-# 全員へ送る。ql_tpc.py と ql_psa.py は --host 127.0.0.1 で同時につないでよい。
+# ql_sync.sh が Storage Node から run を同期する。書き込み中のファイル (*.tmp) も、書き足された分
+# ずつ届く。この送信器はファイルごとにどこまで読んだかを覚え、増えた分のうち書き終わった枠
+# だけを読み、ql_replay.py と同じ形式で、つないできた全員へ送る。ql_tpc.py と ql_psa.py は
+# --host 127.0.0.1 で同時につないでよい。
+#
+# 書き込み中のファイルは、末尾の書きかけの枠の手前で止め、続きは次に届いたときに読む。
+# X.raw.tmp が閉じて X.raw になっても同じファイルとして続きから読み、同じ枠を二度送らない。
+# 途中に壊れた箇所があったときに読み飛ばすのは、閉じたファイルだけにする。書き込み中の
+# ファイルでは、書きかけの枠と見分けがつかないため。
 #
 # いちばん新しい run (YYYYMMDD_runNN) を追い、より新しい run が届いたらそちらへ移る。
 # 途中からつないだ受け手にも、その run でそれまでに送った枠を先に送る。
@@ -33,8 +39,21 @@ from collections import deque
 import numpy as np
 from natsort import natsorted
 
-from check_tpc import FADC_SIZE, FILE_PATTERN, FOOTER, HEAD_SIZE, RECORD_SIZE, load_board
-from ql_replay import HA_PATTERN, split_ha_frames
+from check_tpc import (
+    FADC_MAX,
+    FADC_SIZE,
+    FILE_PATTERN,
+    FOOTER,
+    HEAD_SIZE,
+    MIN_FRAME_SIZE,
+    N_CLOCKS,
+    N_FADC_CH,
+    N_FADC_SAMPLES,
+    N_STRIPS,
+    RECORD_SIZE,
+    decode_file,
+)
+from ql_replay import HA_FOOTER, HA_HEADER, HA_PATTERN
 from ql_tpc import encode_packet
 
 
@@ -42,6 +61,9 @@ RUN_PATTERN = re.compile(r"\d{8}_run\d+$")
 
 # ql_sync.sh が全ノードを 1 周同期するたびに更新するファイル
 SYNC_MARKER = ".ql_sync_done"
+
+# Storage Node が書き込み中のファイルに付ける拡張子
+WRITING_SUFFIX = ".tmp"
 
 
 def parse_args():
@@ -75,52 +97,102 @@ def newest_run(data_dir):
     return max(names) if names else None
 
 
-def tpc_frames(key, path, thin):
-    """1 ファイルから、間引いた [(N_trg, 枠のバイト列)] と最後の N_trg を返す。"""
+def tpc_chunk(side, data, closed, thin):
+    """TPC のファイルの続き data から、書き終わった枠を読む。
 
-    analysis = argparse.Namespace(base_window=30, threshold=20.0)
-    board = load_board(key, [path], analysis)
+    間引いた [(N_trg, 枠のバイト列)]、読めた最後の N_trg、読み終えたバイト数を返す。
+    """
 
-    if len(board["trig"]) == 0:
-        return [], None
+    buf = np.frombuffer(data, dtype=np.uint8)
+    capacity = len(buf) // MIN_FRAME_SIZE + 1
 
-    buf = np.fromfile(path, dtype=np.uint8)
+    trig = np.zeros(capacity, dtype=np.uint32)
+    moment = np.zeros(capacity, dtype=np.uint32)
+    charge = np.zeros((capacity, N_FADC_CH), dtype=np.float32)
+    n_records = np.zeros(capacity, dtype=np.int32)
+    offsets = np.zeros(capacity, dtype=np.uint32)
+    # decode_file が積算する図の分。ここでは使わない
+    image = np.zeros((N_CLOCKS, N_STRIPS), dtype=np.uint32)
+    baseline = np.zeros((N_FADC_CH, FADC_MAX + 1), dtype=np.uint32)
+    wave_map = np.zeros((FADC_MAX + 1, N_FADC_SAMPLES), dtype=np.uint32)
+
+    n_events, _ = decode_file(buf, image, baseline, wave_map, trig, moment, charge, n_records, offsets,
+                              30, 20.0, side == "c")
+
     frames = []
+    last = None
+    position = 0
 
-    for event in np.flatnonzero(board["trig"] % thin == 0):
+    for event in range(n_events):
 
-        start = int(board["offsets"][event])
+        start = int(offsets[event])
+
+        # 枠はすき間なく並ぶ。すき間は、閉じたファイルなら壊れた箇所なので読み飛ばし、
+        # 書き込み中なら書きかけの枠かもしれないので、そこで止める
+        if start != position and not closed:
+            break
+
         body = start + HEAD_SIZE
 
-        if int.from_bytes(buf[body:body + 4].tobytes(), "big") == FOOTER:
+        if int.from_bytes(data[body:body + 4], "big") == FOOTER:
             stop = body + 4
         else:
-            stop = body + FADC_SIZE + 4 + RECORD_SIZE * int(board["n_records"][event]) + 4
+            stop = body + FADC_SIZE + 4 + RECORD_SIZE * int(n_records[event]) + 4
 
-        frames.append((int(board["trig"][event]), buf[start:stop].tobytes()))
+        if stop > len(buf):
+            break
 
-    return frames, int(board["trig"].max())
+        position = stop
+        number = int(trig[event])
+        last = number if last is None else max(last, number)
+
+        if number % thin == 0:
+            frames.append((number, data[start:stop]))
+
+    return frames, last, position
 
 
-def ha_frames(path, thin):
-    """HA の 1 ファイルから、間引いた [(trig, 枠のバイト列)] を返す。"""
+def ha_chunk(data, closed, thin):
+    """HA のファイルの続き data から、書き終わった枠を読む。
 
-    with open(path, "rb") as handle:
-        frames = split_ha_frames(handle.read())
+    間引いた [(trig, 枠のバイト列)] と、読み終えたバイト数を返す。
+    """
 
-    selected = []
+    frames = []
+    position = 0
 
-    for frame in frames:
+    while position < len(data):
 
-        if len(frame) < 12:
+        if data[position:position + 4] != HA_HEADER:
+            # 閉じたファイルなら壊れた箇所なので次のヘッダまで飛ばし、書き込み中なら止める
+            if not closed:
+                break
+            following = data.find(HA_HEADER, position + 1)
+            if following < 0:
+                break
+            position = following
             continue
 
-        trig = int.from_bytes(frame[4:8], "big")
+        stop = data.find(HA_FOOTER, position + 4)
 
-        if trig % thin == 0:
-            selected.append((trig, frame))
+        if stop < 0:
+            break
 
-    return selected
+        frame = data[position:stop + 4]
+        position = stop + 4
+
+        if len(frame) >= 12 and int.from_bytes(frame[4:8], "big") % thin == 0:
+            frames.append((int.from_bytes(frame[4:8], "big"), frame))
+
+    return frames, position
+
+
+def read_more(path, offset):
+    """path の offset から後ろを読む。"""
+
+    with open(path, "rb") as handle:
+        handle.seek(offset)
+        return handle.read()
 
 
 class Follower:
@@ -137,7 +209,7 @@ class Follower:
 
     def reset(self):
 
-        self.seen = set()
+        self.offsets = {}           # {X.raw のパス: 読み終えたバイト数}。X.raw.tmp もこのパスで覚える
         self.pending = []           # まだ送らない TPC の枠 [(N_trg, 側, ボード番号, 枠)]
         self.boards = {}            # {(側, ボード番号): (届いた最後の N_trg, 最新ファイルの mtime)}
         self.last_new_file = time.monotonic()
@@ -173,39 +245,61 @@ class Follower:
         n_files = 0
 
         for directory in directories:
-            for path in natsorted(glob.glob(os.path.join(directory, "*"))):
+            for name in natsorted(self.data_files(directory)):
 
-                if path in self.seen:
+                path = os.path.join(directory, name)
+                # 閉じたあとの名前があればそちらを読む。無ければ書き込み中の .tmp を読む
+                closed = os.path.exists(path)
+                actual = path if closed else path + WRITING_SUFFIX
+                offset = self.offsets.get(path, 0)
+
+                try:
+                    if os.path.getsize(actual) <= offset:
+                        continue
+                    data = read_more(actual, offset)
+                    mtime = os.path.getmtime(actual)
+                except FileNotFoundError:
+                    # 読もうとした間に .tmp が閉じて名前が変わった。次に読む
                     continue
 
-                name = os.path.basename(path)
                 tpc = FILE_PATTERN.search(name)
-                ha = HA_PATTERN.search(name)
-
-                if tpc is None and ha is None:
-                    continue
-
-                self.seen.add(path)
-                n_files += 1
 
                 if tpc:
                     key = (tpc.group(1), int(tpc.group(2)))
-                    frames, last = tpc_frames(key, path, self.args.thin)
+                    frames, last, used = tpc_chunk(key[0], data, closed, self.args.thin)
                     self.pending.extend((trig, key[0], key[1], frame) for trig, frame in frames)
                     if last is not None:
                         previous = self.boards.get(key, (last, 0.0))[0]
-                        self.boards[key] = (max(previous, last), os.path.getmtime(path))
+                        self.boards[key] = (max(previous, last), mtime)
                 else:
-                    index = int(ha.group(1))
-                    ready.extend(("h", index, frame) for _, frame in ha_frames(path, self.args.thin))
+                    index = int(HA_PATTERN.search(name).group(1))
+                    frames, used = ha_chunk(data, closed, self.args.thin)
+                    ready.extend(("h", index, frame) for _, frame in frames)
+
+                if used > 0:
+                    self.offsets[path] = offset + used
+                    n_files += 1
 
         if n_files > 0:
             self.last_new_file = time.monotonic()
-            print(f"[FILES] {run_id}: {n_files} new files", flush=True)
+            print(f"[FILES] {run_id}: {n_files} files grew", flush=True)
 
         ready.extend(self.release_tpc())
 
         return ready, switched
+
+    @staticmethod
+    def data_files(directory):
+        """directory の TPC と HA のファイルの名前を、書き込み中の .tmp を外した形で返す。"""
+
+        names = set()
+
+        for name in os.listdir(directory):
+            base = name[:-len(WRITING_SUFFIX)] if name.endswith(WRITING_SUFFIX) else name
+            if FILE_PATTERN.search(base) or HA_PATTERN.search(base):
+                names.add(base)
+
+        return names
 
     def release_tpc(self):
         """全ボードの分がそろった N_trg までの TPC の枠を、N_trg の順に取り出す。"""

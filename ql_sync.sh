@@ -10,7 +10,10 @@
 #   QL_DEST=/data/ql ./ql_sync.sh
 #
 # 同期するもの: Storage Node の /data/smile_ics/storage_gX → $QL_DEST/storage_gX/
-#   - 書き込み中のファイル（*.tmp）は送らない。閉じたファイルから順に届く
+#   - 書き込み中のファイル（*.tmp）も送る。データのファイル（*.raw, *.dat, *.tmp）は後ろに
+#     書き足されるだけなので、rsync --append で増えた分だけを送る。ノードで .tmp が閉じて名前が
+#     変わったら、こちらでも名前を変えてから続きを送る（送り直さない）
+#   - データ以外（run_meta.json など）は書き換わることがあるので、--append を使わずに送る
 #   - Storage Node で消えたファイルは消さない（collect_runs.sh の削除に追従しない）
 #   - --since（または QL_SINCE）を付けると、run ID（YYYYMMDD_runNN）の日付がそれより前の run は
 #     送らない。metrics など run 以外のディレクトリは常に送る
@@ -83,14 +86,22 @@ mkdir -p "$QL_DEST" || die "$QL_DEST を作れない"
 exec 9>"$QL_DEST/.ql_sync.lock"
 flock -n 9 || die "別の ql_sync.sh が動いている"
 
-SSH_CMD="ssh -o BatchMode=yes -o ConnectTimeout=10"
+# 1 周に何度もつなぐので、接続を使い回す（ControlMaster）。magallan を経由する分の手間が減る。
+# ソケットのパスは 108 バイトまでなので、名前は短くする
+SSH_CMD="ssh -o BatchMode=yes -o ConnectTimeout=10 -o ControlMaster=auto"
+SSH_CMD+=" -o ControlPath=${XDG_RUNTIME_DIR:-/tmp}/qls-%r@%h:%p -o ControlPersist=60"
+
+# データのファイルは後ろに書き足されるだけなので、増えた分だけ送る
+DATA_FILTER=(--append --include='*/' --include='*.raw' --include='*.dat' --include='*.tmp'
+             --exclude='*')
+# データ以外。書き換わることがあるので --append は使わない
+META_FILTER=(--exclude='*.raw' --exclude='*.dat' --exclude='*.tmp')
 
 # rsync を 1 回走らせ、1 行で結果を出す
 run_rsync() {
   local label=$1 node=$2 src=$3 dest=$4 out status files size
   shift 4
-  local opts=(-a --stats --exclude='*.tmp' -e "$SSH_CMD"
-              --rsync-path='nice -n 19 ionice -c3 rsync' "$@")
+  local opts=(-a --stats -e "$SSH_CMD" --rsync-path='nice -n 19 ionice -c3 rsync' "$@")
   [ "$DRY_RUN" -eq 1 ] && opts+=(--dry-run --itemize-changes)
 
   mkdir -p "$dest"
@@ -104,20 +115,25 @@ run_rsync() {
   fi
   [ "$DRY_RUN" -eq 1 ] && printf '%s\n' "$out" | grep '^>f' | sed 's/^/    /'
   files=$(printf '%s\n' "$out" | sed -n 's/^Number of regular files transferred: //p')
-  size=$(printf '%s\n' "$out" | sed -n 's/^Total transferred file size: //p')
-  printf '  %-26s %s: %s files, %s\n' "$label" "$node" "${files:-0}" "${size:-0 bytes}"
+  # 実際にネットワークで受け取った量。--append では、ファイル全体ではなく増えた分になる
+  size=$(printf '%s\n' "$out" | sed -n 's/^Total bytes received: //p')
+  printf '  %-26s %s: %s files, 受信 %s bytes\n' "$label" "$node" "${files:-0}" "${size:-0}"
 }
 
-# ノードの run を一覧し、LATEST（いちばん新しい run）と EXCLUDES（--since より古い run）を決める
+# ノードの run を一覧し、LATEST（いちばん新しい run）と EXCLUDES（--since より古い run）、
+# NODE_TMPS（ノードで書き込み中のファイル。process id からの相対パス）を決める
 list_runs() {
   local node=$1 process_id=$2 listing name
   LATEST=
   EXCLUDES=()
-  if ! listing=$($SSH_CMD "$node" "ls -1 '$SRC_ROOT/$process_id'" 2>&1 </dev/null); then
+  if ! listing=$($SSH_CMD "$node" "cd '$SRC_ROOT/$process_id' && ls -1 && echo '--tmp--' \
+                 && find . -name '*.tmp' -type f" 2>&1 </dev/null); then
     printf '  %-26s %s: 失敗 (run の一覧を取れない)\n' "$process_id" "$node"
     printf '%s\n' "$listing" | head -3 | sed 's/^/    /'
     return 1
   fi
+  NODE_TMPS=$(sed '1,/^--tmp--$/d' <<<"$listing")
+  listing=$(sed '/^--tmp--$/,$d' <<<"$listing")
   while read -r name; do
     [[ $name =~ ^([0-9]{8})_run[0-9]+$ ]] || continue
     if [ -n "$QL_SINCE" ] && [ "${BASH_REMATCH[1]}" \< "$QL_SINCE" ]; then
@@ -126,6 +142,26 @@ list_runs() {
       LATEST=$name
     fi
   done <<<"$listing"
+}
+
+# ノードで閉じて名前が変わった .tmp を、こちらでも同じ名前に変える。変えずにおくと、rsync が
+# 閉じたファイルを別のファイルとして最初から送り直してしまう
+rename_closed() {
+  local process_id=$1 path rel
+  local -A writing=()
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  while read -r rel; do
+    [ -n "$rel" ] && writing[$rel]=1
+  done <<<"$NODE_TMPS"
+  while IFS= read -r -d '' path; do
+    rel="./${path#"$QL_DEST/$process_id/"}"
+    [ -n "${writing[$rel]:-}" ] && continue
+    if [ -e "${path%.tmp}" ]; then
+      rm -f "$path"
+    else
+      mv "$path" "${path%.tmp}"
+    fi
+  done < <(find "$QL_DEST/$process_id" -name '*.tmp' -type f -print0 2>/dev/null)
 }
 
 # 1 周分の同期。QL がすぐ出るよう、まず各ノードのいちばん新しい run だけを送って ql_follow.py に
@@ -145,9 +181,10 @@ sync_once() {
     # 除外が無いときに printf '%q ' が空の引数 '' を作らないよう、あるときだけ書き出す
     excludes[$entry]=
     [ ${#EXCLUDES[@]} -eq 0 ] || excludes[$entry]=$(printf '%q ' "${EXCLUDES[@]}")
+    rename_closed "$process_id"
     [ -n "$LATEST" ] || continue
     run_rsync "$process_id/$LATEST" "$node" "$SRC_ROOT/$process_id/$LATEST/" \
-      "$QL_DEST/$process_id/$LATEST/" || rc=1
+      "$QL_DEST/$process_id/$LATEST/" "${DATA_FILTER[@]}" || rc=1
   done
   [ "$DRY_RUN" -eq 1 ] || touch "$QL_DEST/.ql_sync_done"
 
@@ -156,8 +193,11 @@ sync_once() {
     node=${entry%:*}
     process_id=${entry##*:}
     eval "EXCLUDES=(${excludes[$entry]})"
+    # 除外は include より先に書く。rsync は最初に当てはまった規則を使う
     run_rsync "$process_id（残り）" "$node" "$SRC_ROOT/$process_id/" "$QL_DEST/$process_id/" \
-      --exclude "/${latest[$entry]:-.}/" ${EXCLUDES[@]+"${EXCLUDES[@]}"} || rc=1
+      --exclude "/${latest[$entry]:-.}/" ${EXCLUDES[@]+"${EXCLUDES[@]}"} "${DATA_FILTER[@]}" || rc=1
+    run_rsync "$process_id（データ以外）" "$node" "$SRC_ROOT/$process_id/" "$QL_DEST/$process_id/" \
+      ${EXCLUDES[@]+"${EXCLUDES[@]}"} "${META_FILTER[@]}" || rc=1
   done
 
   df -h "$QL_DEST" | tail -1 | awk '{printf "  空き容量 %s / %s (%s 使用)\n", $4, $2, $5}'
