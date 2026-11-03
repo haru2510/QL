@@ -21,6 +21,7 @@
 !/PSA_analysis/src_onoda/ql_psa.py
 !/PSA_analysis/src_onoda/psa_decode.py
 !/PSA_analysis/src_onoda/check_data.py
+!/PSA_analysis/src_onoda/check_ha_order.py
 !/PSA_analysis/src_onoda/sub_scr/
 /PSA_analysis/src_onoda/sub_scr/*
 !/PSA_analysis/src_onoda/sub_scr/get_info.py
