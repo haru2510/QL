@@ -1,43 +1,48 @@
 # SMILE-3 QL
 
-Storage Node（calltt, killua）が保存した run を QL 用 PC へ同期し、TPC と HA（PSA）の QL を出す。
+Storage Node（calltt, killua）が書いている run から TPC と HA（PSA）の QL を出し、あわせて
+全データを QL 用 PC へ同期する。
 
 ```
-calltt / killua ──(ssh、magallan を ProxyJump)──▶ QL 用 PC ~/smile_ics_ql/storage_gX/<run>/
-                                                    │ ql_follow.py が新しいファイルを間引いて流す
-                                                    ▼ localhost:10012
-                                       ql_tpc.py（:8090） / ql_psa.py（:8091）
+calltt / killua                                QL 用 PC
+  ql_feed.py（間引いて流す）──ssh、magallan を ProxyJump──▶ ql_stream.py
+                                                          │ localhost:10012
+                                                          ▼
+                                        ql_tpc.py（:8090） / ql_psa.py（:8091）
+  /data/smile_ics/storage_gX ──ql_sync.sh（全データ）──▶ ~/smile_ics_ql/storage_gX/<run>/
 ```
+
+QL はノード側で間引いた分（既定 450 分の 1）だけを受けるので、全データの同期を待たず、
+数秒の遅れで更新される。全データの同期は裏で続く。
 
 ## 使い方
 
 ```bash
 cd ~/analysis_sm3_FM
-./ql_live.sh                    # 同期と QL をまとめて起動する。Ctrl-C で全部止まる
+./ql_live.sh                    # QL と全データの同期をまとめて起動する。Ctrl-C で全部止まる
 ./ql_live.sh --since 20261101   # この日付より前の run は同期しない
-./ql_sync.sh --watch            # 同期だけ
+QL_SYNC=0 ./ql_live.sh          # QL だけ出し、全データの同期はしない
 QL_FOLLOW_ARGS=--from-start ./ql_live.sh   # 今の run を最初から積算する
+./ql_sync.sh --watch            # 同期だけ
 ```
 
-起動したときに走っている run は、それまでに届いている分を読み飛ばし、起動した時点から
-積算する（長い run の途中で起動しても、すぐに表示が始まる）。そのあとに始まった run は
+起動したときに走っている run は、起動した時点から積算する。そのあとに始まった run は
 最初から積算する。
 
 ブラウザで TPC は http://127.0.0.1:8090 、HA は http://127.0.0.1:8091 を開く。
 図の PNG は `check_output/` に書く。
 
-書き込み中のファイルも、書き足された分ずつ同期して読むので、QL は同期の間隔（既定 30 秒）
-程度の遅れで更新される。
-
 ## ファイル
 
 | ファイル | 役割 |
 | --- | --- |
-| `ql_live.sh` | 下の 4 つをまとめて起動する |
-| `ql_sync.sh` | Storage Node の run を QL 用 PC へ同期する |
-| `TPC_analysis/ql_follow.py` | 同期したファイルから間引いたイベントを流す |
+| `ql_live.sh` | 下をまとめて起動する |
+| `TPC_analysis/ql_stream.py` | 各ノードで `ql_feed.py` を ssh で動かし、間引いたイベントを合わせて流す |
+| `TPC_analysis/ql_feed.py` | ノード側で run のファイルを追いかけて間引く。ssh で渡すのでノードに置かなくてよい |
 | `TPC_analysis/ql_tpc.py` | TPC の QL |
 | `PSA_analysis/src_onoda/ql_psa.py` | HA の QL |
+| `ql_sync.sh` | Storage Node の全データを QL 用 PC へ同期する |
+| `TPC_analysis/ql_follow.py` | 同期したファイルから間引いたイベントを流す（同期済みのデータで QL を出し直すとき） |
 | `TPC_analysis/ql_replay.py` | 保存済みの run を流す試験用の送信器 |
 
 残りは QL が使う解析の関数。
@@ -54,7 +59,8 @@ QL_FOLLOW_ARGS=--from-start ./ql_live.sh   # 今の run を最初から積算す
    private リポジトリなので、QL 用 PC の公開鍵をリポジトリの Deploy keys（読み取りのみ）に
    登録しておく。
 
-2. Python のパッケージと rsync を入れる。
+2. Python のパッケージと rsync を入れる。Storage Node には python3 と rsync が要る
+   （`ql_feed.py` は標準ライブラリだけで動く）。
 
    ```bash
    pip install numpy matplotlib natsort numba h5py
