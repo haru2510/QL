@@ -11,6 +11,7 @@
 # ほかに、ql_stream.py が 2 台のノードの TPC の枠を N_trg の順にそろえるための知らせを流す。
 #   側 'p' : ボードの進み。枠の代わりに、側 ('a' か 'c') 1 byte と、読み終えた最後の N_trg 4 byte
 #   側 'r' : 追いかける run が変わった。枠の代わりに run ID
+#   側 'd' : --debug のときだけ。読んだファイルの名前と、読み始めた位置、読んだ量、閉じていたか
 #
 # 起動したときの run は、それまでに書かれた分を読み飛ばし、そこから先を流す。そのあとに始まった
 # run は最初から流す。書き込み中のファイル (*.tmp) は、書き終わった枠まで流し、続きは次に読む。
@@ -59,6 +60,8 @@ def parse_args():
     parser.add_argument("--poll", type=float, default=1.0, help="interval to read the files [s]")
     parser.add_argument("--from-start", action="store_true",
                         help="send the run running at startup from its beginning")
+    parser.add_argument("--debug", action="store_true",
+                        help="also send which file was read (for ql_trace.py)")
 
     return parser.parse_args()
 
@@ -259,6 +262,9 @@ class Feed:
                 self.resync.discard(path)
 
             self.offsets[path] = offset + used
+
+            if self.args.debug:
+                self.out.write(packet("d", 0, f"{name} {offset} {used} {int(closed)}".encode()))
 
             for start, stop in frames:
 

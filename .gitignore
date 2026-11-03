@@ -13,6 +13,7 @@
 !/TPC_analysis/ql_follow.py
 !/TPC_analysis/ql_feed.py
 !/TPC_analysis/ql_stream.py
+!/TPC_analysis/ql_trace.py
 
 !/PSA_analysis/
 /PSA_analysis/*
