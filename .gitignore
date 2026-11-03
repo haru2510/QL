@@ -11,6 +11,8 @@
 !/TPC_analysis/ql_tpc.py
 !/TPC_analysis/ql_replay.py
 !/TPC_analysis/ql_follow.py
+!/TPC_analysis/ql_feed.py
+!/TPC_analysis/ql_stream.py
 
 !/PSA_analysis/
 /PSA_analysis/*
