@@ -16,6 +16,8 @@
 # 起動したときの run は、それまでに書かれた分を読み飛ばし、そこから先を流す。そのあとに始まった
 # run は最初から流す。書き込み中のファイル (*.tmp) は、書き終わった枠まで流し、続きは次に読む。
 # X.raw.tmp が閉じて X.raw になっても、同じファイルとして続きから読む。
+# 検出器ごとにファイルの番号の順を守り、前の番号を読み終えるまで次の番号は読まない (番号が飛んだら
+# GAP_WAIT 秒待つ)。順が崩れると、ビューアが trig が戻ったとみなして積算をやり直す。
 #
 
 import argparse
@@ -49,6 +51,13 @@ TPC_PATTERN = re.compile(r"tpc_enc_([ac])(\d+)_\d+\.raw$")
 HA_PATTERN = re.compile(r"ha(\d+)_\d+\.dat$")
 RUN_PATTERN = re.compile(r"\d{8}_run\d+$")
 WRITING_SUFFIX = ".tmp"
+
+# ファイルの名前を、検出器 (tpc_enc_a00, ha06 など) と番号に分ける
+SEQUENCE_PATTERN = re.compile(r"(.+)_(\d+)\.(raw|dat)$")
+
+# 番号の飛んだファイルを待つ時間 [s]。ディレクトリを一覧している最中に名前が変わったファイルは、
+# 一覧に出ないことがある。待っても出てこなければ、無いものとして先へ進む
+GAP_WAIT = 5.0
 
 
 def parse_args():
@@ -177,10 +186,11 @@ class Feed:
         self.offsets = {}   # {X.raw のパス: 読み終えたバイト数}。X.raw.tmp もこのパスで覚える
         self.resync = set()
         self.last = {}      # {(側, ボード番号): 読み終えた最後の N_trg}
-        # 閉じて読み終えたファイル (.tmp を外した名前)。もう増えないので、次からは開かない。
+        # 検出器ごとの、次に読むファイルの番号。それより前のファイルは読み終えているので、もう開かない。
         # 1 つの run に何万ファイルもあるので、毎回すべてを開き直すとノードの負担になる
-        self.done = set()
-        self.kinds = {}     # {ディレクトリの中の名前: .tmp を外した名前。TPC と HA 以外は None}
+        self.next_seq = {}
+        self.gap_since = {}  # {検出器: 次の番号のファイルが一覧に無いと気づいた時刻}
+        self.kinds = {}      # {ディレクトリの中の名前: (検出器, 番号, .tmp を外した名前)。TPC と HA 以外は None}
 
     def newest_run(self):
 
@@ -189,19 +199,45 @@ class Feed:
 
         return max(names) if names else None
 
-    def data_files(self, directory):
-        """まだ読み終えていない TPC と HA のファイルの名前を、.tmp を外した形で名前の順に返す。"""
+    def detector_files(self, directory):
+        """{検出器: [(番号, .tmp を外した名前)]} を、まだ読み終えていないファイルだけ番号の順で返す。"""
 
         names = os.listdir(directory)
+        files = {}
 
         for name in names:
             if name not in self.kinds:
                 base = name[:-len(WRITING_SUFFIX)] if name.endswith(WRITING_SUFFIX) else name
-                self.kinds[name] = base if TPC_PATTERN.search(base) or HA_PATTERN.search(base) else None
+                match = SEQUENCE_PATTERN.match(base)
+                known = match and (TPC_PATTERN.search(base) or HA_PATTERN.search(base))
+                self.kinds[name] = (match.group(1), int(match.group(2)), base) if known else None
+            kind = self.kinds[name]
+            if kind is None:
+                continue
+            detector, seq, base = kind
+            if seq >= self.next_seq.get(detector, -1):
+                files.setdefault(detector, set()).add((seq, base))
 
-        bases = {self.kinds[name] for name in names} - {None} - self.done
+        return {detector: sorted(items) for detector, items in sorted(files.items(), key=lambda item:
+                                                                         natural_key(item[0]))}
 
-        return sorted(bases, key=natural_key)
+    def skip_to_end(self, directory):
+        """起動したときの run の、それまでに書かれた分を読み飛ばす。"""
+
+        for detector, items in self.detector_files(directory).items():
+            for seq, name in items:
+                path = os.path.join(directory, name)
+                if os.path.exists(path):
+                    # 閉じたファイルは読まない
+                    self.next_seq[detector] = seq + 1
+                    continue
+                try:
+                    self.offsets[path] = os.path.getsize(path + WRITING_SUFFIX)
+                except FileNotFoundError:
+                    continue
+                self.resync.add(path)
+                self.next_seq[detector] = seq
+                break
 
     def poll(self):
 
@@ -217,66 +253,33 @@ class Feed:
             self.reset()
             self.out.write(packet("r", 0, run_id.encode()))
             if self.skip_existing:
-                for name in self.data_files(directory):
-                    path = os.path.join(directory, name)
-                    if os.path.exists(path):
-                        self.done.add(name)
-                        continue
-                    try:
-                        self.offsets[path] = os.path.getsize(path + WRITING_SUFFIX)
-                    except FileNotFoundError:
-                        continue
-                    self.resync.add(path)
+                self.skip_to_end(directory)
         self.skip_existing = False
 
         tpc = []
         progress = set()
+        now = time.monotonic()
 
-        for name in self.data_files(directory):
+        for detector, items in self.detector_files(directory).items():
+            for seq, name in items:
 
-            path = os.path.join(directory, name)
-            closed = os.path.exists(path)
-            actual = path if closed else path + WRITING_SUFFIX
-            offset = self.offsets.get(path, 0)
+                expected = self.next_seq.get(detector)
 
-            try:
-                size = os.path.getsize(actual)
-                if size <= offset:
-                    if closed:
-                        self.done.add(name)
-                    continue
-                with open(actual, "rb") as handle:
-                    handle.seek(offset)
-                    data = handle.read()
-            except FileNotFoundError:
-                # 読もうとした間に .tmp が閉じて名前が変わった。次に読む
-                continue
+                # 番号が飛んだ。一覧に出なかっただけかもしれないので、しばらく待つ
+                if expected is not None and seq > expected:
+                    if now - self.gap_since.setdefault(detector, now) < GAP_WAIT:
+                        break
+                self.gap_since.pop(detector, None)
+                self.next_seq[detector] = seq
 
-            match = TPC_PATTERN.search(name)
-            side, index = (match.group(1), int(match.group(2))) if match else \
-                ("h", int(HA_PATTERN.search(name).group(1)))
-            frames, used, resync = walk(data, tpc_frame_end if match else ha_frame_end,
-                                        path in self.resync)
+                closed = self.read_file(directory, name, tpc, progress)
 
-            if not resync:
-                self.resync.discard(path)
+                if closed is None or not closed:
+                    # 書き込み中のファイルより先は、まだ無い (読めなかったときは次に読む)
+                    break
 
-            self.offsets[path] = offset + used
-
-            if self.args.debug:
-                self.out.write(packet("d", 0, f"{name} {offset} {used} {int(closed)}".encode()))
-
-            for start, stop in frames:
-
-                trig = int.from_bytes(data[start + 4:start + 8], "big")
-
-                if match:
-                    self.last[(side, index)] = max(self.last.get((side, index), trig), trig)
-                    progress.add((side, index))
-                    if trig % self.args.thin == 0:
-                        tpc.append((trig, side, index, data[start:stop]))
-                elif trig % self.args.thin == 0:
-                    self.out.write(packet("h", index, data[start:stop]))
+                # 閉じたファイルは読み終えたので、次の番号へ進む
+                self.next_seq[detector] = seq + 1
 
         # TPC は N_trg の順に流し、そのあとで各ボードの進みを知らせる
         for trig, side, index, frame in sorted(tpc, key=lambda item: item[0]):
@@ -286,6 +289,51 @@ class Feed:
             self.out.write(packet("p", index, side.encode() + self.last[(side, index)].to_bytes(4, "big")))
 
         self.out.flush()
+
+    def read_file(self, directory, name, tpc, progress):
+        """1 ファイルの続きを読んで流す。閉じていたかを返す。読めなければ None。"""
+
+        path = os.path.join(directory, name)
+        closed = os.path.exists(path)
+        actual = path if closed else path + WRITING_SUFFIX
+        offset = self.offsets.get(path, 0)
+
+        try:
+            if os.path.getsize(actual) <= offset:
+                return closed
+            with open(actual, "rb") as handle:
+                handle.seek(offset)
+                data = handle.read()
+        except FileNotFoundError:
+            # 読もうとした間に .tmp が閉じて名前が変わった。次に読む
+            return None
+
+        match = TPC_PATTERN.search(name)
+        side, index = (match.group(1), int(match.group(2))) if match else \
+            ("h", int(HA_PATTERN.search(name).group(1)))
+        frames, used, resync = walk(data, tpc_frame_end if match else ha_frame_end, path in self.resync)
+
+        if not resync:
+            self.resync.discard(path)
+
+        self.offsets[path] = offset + used
+
+        if self.args.debug:
+            self.out.write(packet("d", 0, f"{name} {offset} {used} {int(closed)}".encode()))
+
+        for start, stop in frames:
+
+            trig = int.from_bytes(data[start + 4:start + 8], "big")
+
+            if match:
+                self.last[(side, index)] = max(self.last.get((side, index), trig), trig)
+                progress.add((side, index))
+                if trig % self.args.thin == 0:
+                    tpc.append((trig, side, index, data[start:stop]))
+            elif trig % self.args.thin == 0:
+                self.out.write(packet("h", index, data[start:stop]))
+
+        return closed
 
 
 def main():
