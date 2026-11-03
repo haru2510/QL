@@ -8,7 +8,7 @@
 # ブラウザには次の 3 枚を、モニターに収まるように並べる。
 #   1 イベントの図 : 飛跡と FADC 波形。--event-update ごとに最新のイベントへ更新
 #   レートの図     : カウントレートと FADC ベースライン
-#   積算の図       : 飛跡の積算画像、FADC 波形の積算図、スペクトル
+#   積算の図       : 飛跡の積算画像。上の段が uPIC 0-3 の anode、下の段が cathode
 #
 # 1 イベントの図の色は、x が N 側 (uPIC 0, 3) 赤・S 側 (1, 2) 青、
 # y が E 側 (uPIC 0, 1) 赤・W 側 (2, 3) 青。FADC は 1 ch あたり 32 ストリップなので、
@@ -38,6 +38,7 @@ from collections import OrderedDict
 
 import numpy as np
 
+from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 
 from check_tpc import (
@@ -55,11 +56,9 @@ from check_tpc import (
     STRIP_AXES,
     add_analysis_args,
     decode_file,
+    N_UPIC,
     draw_baseline,
-    draw_images,
     draw_rate,
-    draw_spectra,
-    draw_wave_maps,
     measure_tracks,
     save_figure,
 )
@@ -96,7 +95,7 @@ VIEW_PAGE = """<!DOCTYPE html>
 <title>TPC QL</title>
 <style>
 html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
-body { display: grid; height: 100vh; grid-template-columns: 1fr 1fr; grid-template-rows: 33vh 67vh; }
+body { display: grid; height: 100vh; grid-template-columns: 1fr 1fr; grid-template-rows: 32vh 68vh; }
 img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
 #summary { grid-column: 1 / 3; }
 #status { position: fixed; right: 8px; bottom: 4px; font: 12px sans-serif; color: #555; }
@@ -351,14 +350,33 @@ def draw_stats_figure(boards, title, out_path, args):
 
 
 def draw_summary_figure(boards, out_path, args):
-    """飛跡の積算画像、FADC 波形の積算図、スペクトルを描く。"""
+    """飛跡の積算画像を描く。上の段が uPIC 0-3 の anode、下の段が cathode。"""
 
-    fig = Figure(figsize=(24, 9.4), constrained_layout=True)
-    grid = fig.add_gridspec(3, 8)
+    fig = Figure(figsize=(20, 8.4), constrained_layout=True)
+    axes = fig.subplots(2, N_UPIC)
 
-    draw_images(fig, grid, 0, boards)
-    draw_wave_maps(fig, grid, 1, boards)
-    draw_spectra(fig, grid, 2, boards, args)
+    for row, side in enumerate("ac"):
+        for upic in range(N_UPIC):
+
+            ax = axes[row, upic]
+            image = np.zeros((N_CLOCKS, N_BOARDS_PER_UPIC * N_STRIPS), dtype=np.float64)
+
+            # 1 つの uPIC の 1 つの側は、ボード 3 枚 (128 ストリップずつ) を横に並べる
+            for offset in range(N_BOARDS_PER_UPIC):
+                key = (side, upic * N_BOARDS_PER_UPIC + offset)
+                if key in boards:
+                    image[:, offset * N_STRIPS:(offset + 1) * N_STRIPS] = boards[key]["image"]
+
+            if image.max() > 0:
+                ax.imshow(np.ma.masked_equal(image, 0), origin="lower", aspect="auto",
+                          norm=LogNorm(vmin=1), cmap="viridis", interpolation="nearest")
+
+            # データの無い uPIC も、ほかと同じ目盛りにする
+            ax.set_xlim(-0.5, N_BOARDS_PER_UPIC * N_STRIPS - 0.5)
+            ax.set_ylim(-0.5, N_CLOCKS - 0.5)
+            ax.set_title(f"uPIC{upic} {'anode' if side == 'a' else 'cathode'}")
+            ax.set_xlabel("strip")
+            ax.set_ylabel("clock")
 
     save_figure(fig, out_path)
 
