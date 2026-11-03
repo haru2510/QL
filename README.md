@@ -16,7 +16,12 @@ cd ~/analysis_sm3_FM
 ./ql_live.sh                    # 同期と QL をまとめて起動する。Ctrl-C で全部止まる
 ./ql_live.sh --since 20261101   # この日付より前の run は同期しない
 ./ql_sync.sh --watch            # 同期だけ
+QL_FOLLOW_ARGS=--from-start ./ql_live.sh   # 今の run を最初から積算する
 ```
+
+起動したときに走っている run は、それまでに届いている分を読み飛ばし、起動した時点から
+積算する（長い run の途中で起動しても、すぐに表示が始まる）。そのあとに始まった run は
+最初から積算する。
 
 ブラウザで TPC は http://127.0.0.1:8090 、HA は http://127.0.0.1:8091 を開く。
 図の PNG は `check_output/` に書く。

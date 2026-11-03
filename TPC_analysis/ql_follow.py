@@ -13,6 +13,9 @@
 # ファイルでは、書きかけの枠と見分けがつかないため。
 #
 # いちばん新しい run (YYYYMMDD_runNN) を追い、より新しい run が届いたらそちらへ移る。
+# 起動したときにすでに届いている分は読み飛ばし、そこから先を読む (長い run の途中で起動しても
+# すぐに表示が始まる)。run の最初から読むときは --from-start を付ける。起動したあとに始まった
+# run は最初から読む。
 # 途中からつないだ受け手にも、その run でそれまでに送った枠を先に送る。
 #
 # ql_tpc.py は、全ボードを通した N_trg の最大値から大きく戻ると新しい run とみなす。ボードごとに
@@ -75,6 +78,9 @@ def parse_args():
                         help="run ID to send (default: follow the newest run)")
     parser.add_argument("--port", type=int, default=10012, help="TCP port to listen on")
     parser.add_argument("--bind", default="127.0.0.1", help="address to listen on")
+    parser.add_argument("--from-start", action="store_true",
+                        help="read the run running at startup from its beginning "
+                             "(default: skip what has already arrived)")
     parser.add_argument("--thin", type=int, default=450,
                         help="send triggers whose N_trg is a multiple of this [triggers]")
     parser.add_argument("--poll", type=float, default=5.0, help="interval to look for new files [s]")
@@ -205,11 +211,13 @@ class Follower:
         self.expected = set()       # 前の run にあったボード。この run でも待つ
         self.marker_mtime = None
         self.synced = False         # .ql_sync_done を見て読むか
+        self.skip_existing = not args.from_start   # 起動したときの run は、届いている分を読み飛ばす
         self.reset()
 
     def reset(self):
 
         self.offsets = {}           # {X.raw のパス: 読み終えたバイト数}。X.raw.tmp もこのパスで覚える
+        self.resync = set()         # 読み飛ばした位置が枠の途中かもしれないので、次の枠の頭を探すファイル
         self.pending = []           # まだ送らない TPC の枠 [(N_trg, 側, ボード番号, 枠)]
         self.boards = {}            # {(側, ボード番号): (届いた最後の N_trg, 最新ファイルの mtime)}
         self.last_new_file = time.monotonic()
@@ -244,6 +252,11 @@ class Follower:
         ready = []
         n_files = 0
 
+        if self.skip_existing:
+            self.skip_existing = False
+            self.skip_to_end(directories, run_id)
+            return [], switched
+
         for directory in directories:
             for name in natsorted(self.data_files(directory)):
 
@@ -266,18 +279,20 @@ class Follower:
 
                 if tpc:
                     key = (tpc.group(1), int(tpc.group(2)))
-                    frames, last, used = tpc_chunk(key[0], data, closed, self.args.thin)
+                    frames, last, used = tpc_chunk(key[0], data, closed or path in self.resync,
+                                                   self.args.thin)
                     self.pending.extend((trig, key[0], key[1], frame) for trig, frame in frames)
                     if last is not None:
                         previous = self.boards.get(key, (last, 0.0))[0]
                         self.boards[key] = (max(previous, last), mtime)
                 else:
                     index = int(HA_PATTERN.search(name).group(1))
-                    frames, used = ha_chunk(data, closed, self.args.thin)
+                    frames, used = ha_chunk(data, closed or path in self.resync, self.args.thin)
                     ready.extend(("h", index, frame) for _, frame in frames)
 
                 if used > 0:
                     self.offsets[path] = offset + used
+                    self.resync.discard(path)
                     n_files += 1
 
         if n_files > 0:
@@ -287,6 +302,28 @@ class Follower:
         ready.extend(self.release_tpc())
 
         return ready, switched
+
+    def skip_to_end(self, directories, run_id):
+        """届いている分を読み飛ばし、次からはその続きを読む。"""
+
+        n_files = 0
+        n_bytes = 0
+
+        for directory in directories:
+            for name in self.data_files(directory):
+                path = os.path.join(directory, name)
+                actual = path if os.path.exists(path) else path + WRITING_SUFFIX
+                try:
+                    self.offsets[path] = os.path.getsize(actual)
+                except FileNotFoundError:
+                    continue
+                # 書き込み中のファイルの末尾は枠の途中かもしれない。次は枠の頭を探して読む
+                self.resync.add(path)
+                n_files += 1
+                n_bytes += self.offsets[path]
+
+        print(f"[SKIP] {run_id}: skip {n_files} files ({n_bytes / 1e6:.1f} MB) already received. "
+              "use --from-start to read them", flush=True)
 
     @staticmethod
     def data_files(directory):

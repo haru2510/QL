@@ -5,6 +5,7 @@
 #   ./ql_live.sh --since 20261101    # 同期する run を日付で絞る（ql_sync.sh に渡す）
 #   QL_DEST=/data/ql QL_INTERVAL=10 ./ql_live.sh
 #   QL_VIEWER_ARGS="--no-open --http-bind 0.0.0.0" ./ql_live.sh   # ql_tpc.py / ql_psa.py に渡す
+#   QL_FOLLOW_ARGS=--from-start ./ql_live.sh   # 今の run を最初から読む（既定は起動した時点から）
 #
 # 起動するもの
 #   ql_sync.sh --watch       : Storage Node の run を $QL_DEST へ同期し続ける
@@ -23,12 +24,13 @@ QL_INTERVAL=${QL_INTERVAL:-30}
 PYTHON=${PYTHON:-python3}
 OUT_DIR=${QL_OUT_DIR:-$HERE/check_output}
 read -r -a VIEWER_ARGS <<<"${QL_VIEWER_ARGS:-}"
+read -r -a FOLLOW_ARGS <<<"${QL_FOLLOW_ARGS:-}"
 
 # Ctrl-C や 1 つが落ちたときに、起動した全部を止める
 trap 'trap - EXIT; kill 0 2>/dev/null' INT TERM EXIT
 
 "$HERE/ql_sync.sh" --watch "$QL_INTERVAL" "$@" &
-"$PYTHON" "$HERE/TPC_analysis/ql_follow.py" --data-dir "$QL_DEST" &
+"$PYTHON" "$HERE/TPC_analysis/ql_follow.py" --data-dir "$QL_DEST" ${FOLLOW_ARGS[@]+"${FOLLOW_ARGS[@]}"} &
 "$PYTHON" "$HERE/TPC_analysis/ql_tpc.py" --host 127.0.0.1 -o "$OUT_DIR" ${VIEWER_ARGS[@]+"${VIEWER_ARGS[@]}"} &
 "$PYTHON" "$HERE/PSA_analysis/src_onoda/ql_psa.py" --host 127.0.0.1 -o "$OUT_DIR" ${VIEWER_ARGS[@]+"${VIEWER_ARGS[@]}"} &
 
