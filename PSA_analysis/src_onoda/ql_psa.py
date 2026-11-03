@@ -9,7 +9,8 @@
 # ブラウザには次の 2 枚を、モニターに収まるように並べる。
 #   バタフライマップ : 全 HA を、底面 (ha00-05) を中央に、側面 (N: ha06, 07 / E: ha15, 16 /
 #                      S: ha12, 13 / W: ha09, 10) をその上下左右に置いた十字形に並べる。
-#                      HA ごとに 6 ch のバタフライマップを描き、ヒットの無い ch は赤く塗る
+#                      HA ごとに 6 ch のバタフライマップを描き、ヒットの無い ch は赤く塗る。
+#                      HA ごとの直近のトリガレートを書き、レートが高いほどタイルを濃いオレンジにする
 #   ペデスタル       : HA と ch ごとの HG0-3 / LG0-3 のペデスタル (中央値と標準偏差)。
 #                      面ごとに色帯を付け、バタフライマップと同じ色で並べる
 #
@@ -25,6 +26,7 @@ import traceback
 from pathlib import Path
 
 import numpy as np
+from matplotlib import colormaps
 from matplotlib.colors import LogNorm
 from matplotlib.figure import Figure
 
@@ -78,6 +80,15 @@ GROUP_PLACES = {           # 十字形の 4 行 x 5 列のうち、面を置く�
 }
 # HA_GROUPS に無い HA (未接続の ha08 などがつながったとき) を置く、十字形の四隅
 SPARE_PLACES = [(0, 0), (0, 4), (3, 0), (3, 4)]
+
+# トリガレートに応じてタイルの背景を塗る色
+RATE_COLORS = colormaps["Oranges"]
+
+# ch あたり平均でこれだけヒットがたまってから、ヒットの無い ch を赤く塗る。少ないうちは偶然 0 になる
+DEAD_CH_HITS = 10
+
+# 一覧の図のトリガレートは、直近のこの秒数で求める
+RATE_WINDOW = 60.0
 
 # 一覧の図は 1 枚が小さいので、ビンをさらに粗くする。細かいままだと 1 ビンが 1 画素より小さくなる
 OVERVIEW_BINS = (N_BINS_X // 5, N_BINS_Y // 5)
@@ -219,12 +230,44 @@ def butterfly_counts(state, ch, bins):
     return counts, x_edges, y_edges, n_hits
 
 
-def draw_ha_tile(tile, index, state):
-    """一覧の図の 1 台分。6 ch のバタフライマップを 2 行 3 列で小さく描き、ヒットの無い ch は赤く塗る。"""
+def recent_rate(state):
+    """直近 RATE_WINDOW 秒のトリガレート [Hz]。間引く前の trig の増え方を HA の clk の時間で割る。"""
+
+    seconds, trig = state["seconds"], state["trig"]
+
+    if len(trig) < 2:
+        return None
+
+    selected = seconds >= seconds[-1] - RATE_WINDOW
+
+    if selected.sum() < 2:
+        selected = slice(-2, None)
+
+    span = seconds[selected][-1] - seconds[selected][0]
+
+    return (trig[selected][-1] - trig[selected][0]) / span if span > 0 else None
+
+
+def draw_ha_tile(tile, index, state, max_rate):
+    """一覧の図の 1 台分。6 ch のバタフライマップを 2 行 3 列で小さく描き、ヒットの無い ch は赤く塗る。
+
+    どの HA に集中しているかが分かるよう、トリガレートを題に書き、全 HA で最も高いレートに対する
+    割合でタイルの背景を濃く塗る。
+    """
 
     n_hits = 0 if state is None else len(state["ch"])
-    tile.suptitle(f"ha{index:02d}  {n_hits} hits" if state is not None else f"ha{index:02d}  no data",
-                  fontsize=9, fontweight="bold")
+    rate = None if state is None else recent_rate(state)
+
+    if state is None:
+        label = f"ha{index:02d}  no data"
+    elif rate is None:
+        label = f"ha{index:02d}  -- Hz  ({n_hits} hits)"
+    else:
+        label = f"ha{index:02d}  {rate:.3g} Hz  ({n_hits} hits)"
+        if max_rate:
+            tile.set_facecolor(RATE_COLORS(0.05 + 0.6 * rate / max_rate))
+
+    tile.suptitle(label, fontsize=9, fontweight="bold")
     axes = tile.subplots(2, 3).ravel()
 
     for ch, ax in enumerate(axes[:N_CHANNELS]):
@@ -242,8 +285,8 @@ def draw_ha_tile(tile, index, state):
             ax.imshow(np.ma.masked_equal(counts.T, 0), origin="lower", aspect="auto",
                       extent=(X_MIN, X_MAX, Y_MIN, Y_MAX), norm=LogNorm(vmin=1),
                       cmap="viridis", interpolation="nearest")
-        elif n_hits > 0:
-            # ほかの ch にはヒットがあるのに、この ch だけ無い
+        elif n_hits >= DEAD_CH_HITS * N_CHANNELS:
+            # ほかの ch には十分ヒットがあるのに、この ch だけ無い
             ax.set_facecolor("#f4b6b6")
 
         ax.set_xlim(X_MIN, X_MAX)
@@ -257,6 +300,9 @@ def draw_overview_figure(states, title, out_path):
     配置にある HA は、データがまだ無くても灰色の枠を出す。配置に無い HA は四隅に置く。
     """
 
+    rates = [rate for rate in (recent_rate(state) for state in states.values()) if rate is not None]
+    max_rate = max(rates) if rates else None
+
     fig = Figure(figsize=(14, 10.5), constrained_layout=True)
     grid = fig.add_gridspec(4, 5)
 
@@ -268,14 +314,14 @@ def draw_overview_figure(states, title, out_path):
         tiles = np.atleast_1d(group.subfigures(n_rows, n_cols, wspace=0.03, hspace=0.03)).ravel()
 
         for tile, index in zip(tiles, members):
-            draw_ha_tile(tile, index, states.get(index))
+            draw_ha_tile(tile, index, states.get(index), max_rate)
 
     grouped = {index for _, _, members in HA_GROUPS for index in members}
     spares = [index for index in states if index not in grouped]
 
     for place, index in zip(SPARE_PLACES, spares):
         tile = fig.add_subfigure(grid[place], facecolor="#f2f2f2", edgecolor="0.6", linewidth=1)
-        draw_ha_tile(tile, index, states[index])
+        draw_ha_tile(tile, index, states[index], max_rate)
 
     fig.suptitle(title, fontsize=11)
 
