@@ -169,6 +169,7 @@ rename_closed() {
 sync_once() {
   local entry node process_id rc=0
   local -A latest=() excludes=() listed=()
+  local started=$SECONDS
   printf '[%s] %s へ同期%s\n' "$(date '+%F %T')" "$QL_DEST" "${QL_SINCE:+（$QL_SINCE 以降の run）}"
 
   for entry in $QL_NODES; do
@@ -187,6 +188,8 @@ sync_once() {
       "$QL_DEST/$process_id/$LATEST/" "${DATA_FILTER[@]}" || rc=1
   done
   [ "$DRY_RUN" -eq 1 ] || touch "$QL_DEST/.ql_sync_done"
+  # QL はここまで終わると更新される。かかった時間を出し、遅れの元を見分けられるようにする
+  printf '  いちばん新しい run まで %d 秒\n' $((SECONDS - started))
 
   for entry in $QL_NODES; do
     [ -n "${listed[$entry]:-}" ] || continue
@@ -200,6 +203,7 @@ sync_once() {
       ${EXCLUDES[@]+"${EXCLUDES[@]}"} "${META_FILTER[@]}" || rc=1
   done
 
+  printf '  1 周 %d 秒\n' $((SECONDS - started))
   df -h "$QL_DEST" | tail -1 | awk '{printf "  空き容量 %s / %s (%s 使用)\n", $4, $2, $5}'
   # 全ノードを 1 周したことを ql_follow.py に知らせる。dry-run では何も届いていないので触らない
   [ "$DRY_RUN" -eq 1 ] || touch "$QL_DEST/.ql_sync_done"
