@@ -13,7 +13,7 @@
 #                    S: ha12, 13 / W: ha09, 10) をその上下左右に置いた十字形に並べる。
 #                    HA ごとに 6 ch のバタフライマップを小さく描き、ヒットの無い ch は赤く塗る
 #   詳細の図       : ページのボタン (または ← →) で選んだ 1 台の、6 ch のバタフライマップ、
-#                    hg の分布、peak_id の分布
+#                    hg と peak_id の分布、最新イベントの HG / LG の波形、ペデスタル
 #
 # 解析は psa_decode.py の decode_events をそのまま使う。
 #
@@ -272,6 +272,7 @@ class HaState:
         self.temp = []
         self.hits = {name: [] for name in ("ch", "hg", "x_hg", "y_hg", "peak_id", "satu_h")}
         self.ped = []
+        self.latest_event = None    # ヒットのあった最新イベント (trig, ヒット)。詳細の図の波形に使う
         self.previous_clock = None
         self.elapsed = 0
 
@@ -291,12 +292,16 @@ class HaState:
                 self.hits[name].append(hit[name])
             self.ped.append(hit["ped"])
 
+        if len(hits) > 0:
+            self.latest_event = (trig, hits)
+
     def snapshot(self):
 
         state = {name: np.array(values) for name, values in self.hits.items()}
         state["ped"] = np.array(self.ped, dtype=np.float32).reshape(-1, len(SIGNALS))
         state["trig"] = np.array(self.trig, dtype=np.int64)
         state["seconds"] = np.array(self.seconds, dtype=np.float64)
+        state["latest_event"] = self.latest_event
 
         return state
 
@@ -328,13 +333,9 @@ def trigger_rate(state, rate_bin):
     return edges, rate
 
 
-def draw_event_figure(event, out_path):
-    """最新イベントの HG0-3 と LG0-3 の波形を描く。"""
+def draw_waveforms(ax_hg, ax_lg, hits, note="pedestal subtracted", legend_size=7):
+    """1 イベントの HG0-3 と LG0-3 の波形 (ペデスタルを引いた値) を描き、ヒットごとの説明を返す。"""
 
-    fig = Figure(figsize=(12, 3.6), constrained_layout=True)
-    ax_hg, ax_lg = fig.subplots(1, 2)
-
-    index, trig, hits = event
     samples = np.arange(N_SAMPLES)
     labels = []
 
@@ -353,12 +354,24 @@ def draw_event_figure(event, out_path):
                       + (", saturated" if hit["satu_h"] else ""))
 
     for ax, name in ((ax_hg, "HG"), (ax_lg, "LG")):
-        ax.set_title(f"{name} waveform (pedestal subtracted)")
+        ax.set_title(f"{name} waveform ({note})")
         ax.set_xlabel("sample")
         ax.set_ylabel("ADC")
         ax.set_xlim(0, N_SAMPLES - 1)
         if len(hits) > 0:
-            ax.legend(fontsize=7, ncol=2)
+            ax.legend(fontsize=legend_size, ncol=2)
+
+    return labels
+
+
+def draw_event_figure(event, out_path):
+    """最新イベントの HG0-3 と LG0-3 の波形を描く。"""
+
+    fig = Figure(figsize=(12, 3.6), constrained_layout=True)
+    ax_hg, ax_lg = fig.subplots(1, 2)
+
+    index, trig, hits = event
+    labels = draw_waveforms(ax_hg, ax_lg, hits)
 
     fig.suptitle(f"ha{index:02d}   trig {trig}   " + ("   ".join(labels) if labels else "no hit"),
                  fontsize=10)
@@ -492,13 +505,44 @@ def draw_overview_figure(states, title, out_path):
     save_figure(fig, out_path)
 
 
-def draw_detail_figure(index, state, out_path):
-    """1 台分の詳細。6 ch のバタフライマップ (2 行 3 列)、hg の分布、peak_id の分布を描く。"""
+def draw_ha_pedestal(ax, state, signals, name):
+    """1 台分の、signals (HG0-3 か LG0-3) のペデスタル。ch ごとに中央値と標準偏差を描く。"""
 
-    fig = Figure(figsize=(11, 10.5), constrained_layout=True)
-    grid = fig.add_gridspec(3, 3)
+    positions = np.arange(len(signals))
+
+    for ch in range(N_CHANNELS):
+
+        selected = state["ch"] == ch if len(state["ch"]) else np.zeros(0, dtype=bool)
+
+        if not selected.any():
+            continue
+
+        ped = state["ped"][selected][:, list(signals)]
+        ax.errorbar(positions + (ch - 2.5) * 0.12, np.median(ped, axis=0), yerr=ped.std(axis=0),
+                    fmt="o", markersize=3, capsize=2, label=f"ch{ch}")
+
+    ax.set_xticks(positions, [SIGNALS[signal] for signal in signals], fontsize=7)
+    ax.set_xlim(-0.5, len(signals) - 0.5)
+    ax.tick_params(axis="y", labelsize=7)
+    ax.set_title(f"{name} pedestal", fontsize=10)
+    if name == "HG":
+        ax.set_ylabel("median, std [ADC]")
+        if len(state["ch"]) > 0:
+            ax.legend(fontsize=6, ncol=2)
+
+
+def draw_detail_figure(index, state, out_path):
+    """1 台分の詳細。6 ch のバタフライマップ (2 行 3 列)、hg と peak_id の分布、最新イベントの
+    HG / LG の波形、ペデスタルを描く。"""
+
+    fig = Figure(figsize=(11, 13.5), constrained_layout=True)
+    grid = fig.add_gridspec(4, 3)
     ax_hg = fig.add_subplot(grid[2, 0:2])
     ax_peak = fig.add_subplot(grid[2, 2])
+    ax_wave_hg = fig.add_subplot(grid[3, 0])
+    ax_wave_lg = fig.add_subplot(grid[3, 1])
+    # HG と LG はペデスタルの高さが大きく違うので、縦軸を分ける
+    ax_ped_hg, ax_ped_lg = grid[3, 2].subgridspec(1, 2, wspace=0.05).subplots()
 
     for ch in range(N_CHANNELS):
 
@@ -531,6 +575,17 @@ def draw_detail_figure(index, state, out_path):
     for ax in (ax_hg, ax_peak):
         if len(state["ch"]) > 0:
             ax.legend(fontsize=7)
+
+    # 最新イベントの波形。ヒットの説明は図が混むので、どの trig かだけを題に足す
+    if state["latest_event"] is not None:
+        trig, hits = state["latest_event"]
+        draw_waveforms(ax_wave_hg, ax_wave_lg, hits, note=f"trig {trig}", legend_size=6)
+    else:
+        for ax, name in ((ax_wave_hg, "HG"), (ax_wave_lg, "LG")):
+            ax.set_title(f"{name} waveform (no hit yet)", fontsize=10)
+
+    draw_ha_pedestal(ax_ped_hg, state, range(4), "HG")
+    draw_ha_pedestal(ax_ped_lg, state, range(4, 8), "LG")
 
     group = next((label for label, _, members in HA_GROUPS if index in members), "other")
     fig.suptitle(f"ha{index:02d} ({group})  {len(state['ch'])} hits", fontsize=12, fontweight="bold")
