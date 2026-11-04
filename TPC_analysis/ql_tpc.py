@@ -10,6 +10,10 @@
 #   レートの図     : カウントレート、FADC ベースライン、dE/dx (全 uPIC の飛跡長とアノード電荷の 2 次元図)
 #   積算の図       : 飛跡の積算画像。上の段が uPIC 0-3 の anode、下の段が cathode。画面の大半を使う
 #
+# FADC は別のページ (/fadc) に、どちらも上の段が uPIC 0-3 の anode、下の段が cathode で並べる。
+#   FADC 波形の図  : 1 イベントの図と同じイベントの、ボード 3 枚 x 4 ch の波形 (生の値)
+#   FADC 積算の図  : 飛跡のあるイベントの FADC 波形の積算 (ADC x サンプル)
+#
 # 1 イベントの図の色は、x が N 側 (uPIC 0, 3) 赤・S 側 (1, 2) 青、
 # y が E 側 (uPIC 0, 1) 赤・W 側 (2, 3) 青。FADC は 1 ch あたり 32 ストリップなので、
 # その中央に波形を縦向きに重ねる。縦軸は 1 サンプル = 2 クロックとしている。
@@ -130,6 +134,46 @@ watch("summary", SUMMARY_MS);
 """
 
 
+# FADC のページ。上に 1 イベントの波形、下に波形の積算を並べる
+FADC_PAGE = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>TPC FADC QL</title>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+body { display: grid; height: 100vh; grid-template-rows: 46vh 54vh; }
+img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+#status { position: fixed; right: 8px; bottom: 4px; font: 12px sans-serif; color: #555; }
+</style>
+</head>
+<body>
+<img id="fadc_event" alt="">
+<img id="fadc_map" alt="">
+<div id="status">図を待っています</div>
+<script>
+const statusLine = document.getElementById("status");
+function watch(name, interval) {
+  const figure = document.getElementById(name);
+  function refresh() {
+    const next = new Image();
+    next.onload = () => {
+      figure.src = next.src;
+      statusLine.textContent = "読み込み " + new Date().toLocaleTimeString();
+    };
+    next.src = "/" + name + ".png?t=" + Date.now();
+  }
+  refresh();
+  setInterval(refresh, interval);
+}
+watch("fadc_event", EVENT_MS);
+watch("fadc_map", SUMMARY_MS);
+</script>
+</body>
+</html>
+"""
+
+
 def parse_args():
 
     parser = argparse.ArgumentParser(description="TPC quick look for thinned events from zeno")
@@ -203,8 +247,8 @@ class ViewHandler(http.server.BaseHTTPRequestHandler):
 
         path = self.path.split("?")[0]
 
-        if path == "/":
-            self.reply("text/html; charset=utf-8", self.server.page)
+        if path in self.server.pages:
+            self.reply("text/html; charset=utf-8", self.server.pages[path])
         elif path in self.server.images:
             try:
                 with open(self.server.images[path], "rb") as handle:
@@ -228,16 +272,20 @@ class ViewHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def start_viewer(args, paths, page=VIEW_PAGE):
-    """表示用の HTTP サーバーを別スレッドで動かし、URL を返す。"""
+def start_viewer(args, paths, page=VIEW_PAGE, extra_pages=None):
+    """表示用の HTTP サーバーを別スレッドで動かし、URL を返す。
+
+    page は / に出す。extra_pages ({"/fadc": ページ} など) があれば、その URL にも出す。
+    """
 
     server = http.server.ThreadingHTTPServer((args.http_bind, args.http_port), ViewHandler)
     server.daemon_threads = True
     server.images = {f"/{name}.png": path for name, path in paths.items()}
-    server.page = (page
-                   .replace("EVENT_MS", str(int(args.event_update * 1000)))
-                   .replace("SUMMARY_MS", str(int(args.update * 1000)))
-                   .encode("utf-8"))
+    server.pages = {url: (text
+                          .replace("EVENT_MS", str(int(args.event_update * 1000)))
+                          .replace("SUMMARY_MS", str(int(args.update * 1000)))
+                          .encode("utf-8"))
+                    for url, text in {"/": page, **(extra_pages or {})}.items()}
 
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
@@ -332,6 +380,91 @@ def draw_event_figure(frames, trig, out_path, args):
 
     fig.suptitle(f"Event ID (N_trg): {trig}   Time cnt: {moment}   Hit boards: {n_hit_boards}",
                  fontsize=10)
+
+    save_figure(fig, out_path)
+
+
+def draw_fadc_event_figure(frames, trig, out_path):
+    """1 イベントの FADC 波形 (生の値) を、uPIC と anode / cathode ごとに描く。ボードごとに色を変える。"""
+
+    fig = Figure(figsize=(20, 7.6), constrained_layout=True)
+    axes = fig.subplots(2, N_UPIC, sharex=True)
+    samples = np.arange(N_FADC_SAMPLES)
+    moment = None
+
+    for row, side in enumerate("ac"):
+        for upic in range(N_UPIC):
+
+            ax = axes[row, upic]
+            n_boards = 0
+
+            for offset in range(N_BOARDS_PER_UPIC):
+                frame = frames.get((side, upic * N_BOARDS_PER_UPIC + offset))
+                if frame is None:
+                    continue
+                moment, wave, _ = parse_event(frame)
+                if wave is None:
+                    continue
+                n_boards += 1
+                for ch in range(N_FADC_CH):
+                    ax.plot(samples, wave[ch], color=f"C{offset}", linewidth=0.7,
+                            label=f"board {offset}" if ch == 0 else None)
+
+            ax.set_xlim(0, N_FADC_SAMPLES - 1)
+            if n_boards == 0:
+                ax.set_ylim(0, FADC_MAX)
+            ax.set_title(f"uPIC{upic} {'anode' if side == 'a' else 'cathode'} ({n_boards} boards with FADC)",
+                         fontsize=10)
+            if n_boards > 0:
+                ax.legend(fontsize=7, loc="upper right")
+            if row == 1:
+                ax.set_xlabel("sample (20 ns)")
+            if upic == 0:
+                ax.set_ylabel("FADC [ADC]")
+
+    fig.suptitle(f"FADC waveform   Event ID (N_trg): {trig}   Time cnt: {moment}   "
+                 f"(4 ch per board, raw value)", fontsize=11)
+
+    save_figure(fig, out_path)
+
+
+def draw_fadc_map_figure(boards, title, out_path):
+    """飛跡のあるイベントの FADC 波形の積算を、uPIC と anode / cathode ごとに描く。
+
+    縦軸はデータのある ADC の範囲に寄せる。0-1023 のままだと、波形が細い帯にしか見えない。
+    """
+
+    fig = Figure(figsize=(20, 8.8), constrained_layout=True)
+    axes = fig.subplots(2, N_UPIC, sharex=True)
+
+    for row, side in enumerate("ac"):
+        for upic in range(N_UPIC):
+
+            ax = axes[row, upic]
+            wave_map = np.zeros((FADC_MAX + 1, N_FADC_SAMPLES), dtype=np.float64)
+
+            for offset in range(N_BOARDS_PER_UPIC):
+                key = (side, upic * N_BOARDS_PER_UPIC + offset)
+                if key in boards:
+                    wave_map += boards[key]["wave_map"]
+
+            if wave_map.max() > 0:
+                ax.imshow(np.ma.masked_equal(wave_map, 0), origin="lower", aspect="auto",
+                          norm=LogNorm(vmin=1), cmap="viridis", interpolation="nearest")
+                filled = np.flatnonzero(wave_map.sum(axis=1))
+                margin = max(10, 0.1 * (filled[-1] - filled[0]))
+                ax.set_ylim(max(-0.5, filled[0] - margin), min(FADC_MAX + 0.5, filled[-1] + margin))
+            else:
+                ax.set_ylim(-0.5, FADC_MAX + 0.5)
+
+            ax.set_xlim(-0.5, N_FADC_SAMPLES - 0.5)
+            ax.set_title(f"uPIC{upic} {'anode' if side == 'a' else 'cathode'} FADC", fontsize=10)
+            if row == 1:
+                ax.set_xlabel("sample (20 ns)")
+            if upic == 0:
+                ax.set_ylabel("FADC [ADC]")
+
+    fig.suptitle(f"FADC accumulated   {title}", fontsize=11)
 
     save_figure(fig, out_path)
 
@@ -484,8 +617,8 @@ def open_browser(url):
         webbrowser.open(url)
 
 
-def prepare_view(args, paths, page=VIEW_PAGE):
-    """前回の図を消し、表示用のサーバーを動かしてブラウザを開く。"""
+def prepare_view(args, paths, page=VIEW_PAGE, extra_pages=None):
+    """前回の図を消し、表示用のサーバーを動かしてブラウザを開く。extra_pages のページも開く。"""
 
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -494,11 +627,13 @@ def prepare_view(args, paths, page=VIEW_PAGE):
         if os.path.exists(path):
             os.remove(path)
 
-    url = start_viewer(args, paths, page)
-    print(f"[VIEW] {url}", flush=True)
+    url = start_viewer(args, paths, page, extra_pages)
+    urls = [url] + [url.rstrip("/") + extra for extra in (extra_pages or {})]
 
-    if not args.no_open:
-        open_browser(url)
+    for each in urls:
+        print(f"[VIEW] {each}", flush=True)
+        if not args.no_open:
+            open_browser(each)
 
 
 async def receive_packets(reader, sides, on_frame, on_bad):
@@ -627,7 +762,7 @@ class QuickLook:
 
         self.args = args
         self.paths = {name: os.path.join(args.out_dir, f"{args.name}_{name}.png")
-                      for name in ("event", "stats", "summary")}
+                      for name in ("event", "stats", "summary", "fadc_event", "fadc_map")}
         self.bad_packets = 0
         self.reset()
 
@@ -688,6 +823,7 @@ class QuickLook:
 
         trig, frames = self.event_frames()
         await asyncio.to_thread(draw_event_figure, frames, trig, self.paths["event"], self.args)
+        await asyncio.to_thread(draw_fadc_event_figure, frames, trig, self.paths["fadc_event"])
 
     async def draw_accumulated(self):
 
@@ -695,6 +831,7 @@ class QuickLook:
 
         await asyncio.to_thread(draw_stats_figure, boards, title, self.paths["stats"], self.args)
         await asyncio.to_thread(draw_summary_figure, boards, self.paths["summary"], self.args)
+        await asyncio.to_thread(draw_fadc_map_figure, boards, title, self.paths["fadc_map"])
 
         print(f"[DRAW] {title}", flush=True)
 
@@ -729,7 +866,7 @@ async def run(args):
 
     quick_look = QuickLook(args)
 
-    prepare_view(args, quick_look.paths)
+    prepare_view(args, quick_look.paths, VIEW_PAGE, {"/fadc": FADC_PAGE})
 
     await asyncio.gather(receive_loop(args, "ac", quick_look.add, quick_look.count_bad),
                          quick_look.update_loop())

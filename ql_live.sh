@@ -11,7 +11,7 @@
 # 起動するもの
 #   TPC_analysis/ql_stream.py: 各 Storage Node で ql_feed.py を ssh で動かし、ノード側で間引いた
 #                              イベントを受けて localhost:10012 で流す
-#   TPC_analysis/ql_tpc.py   : TPC の QL（ブラウザ http://127.0.0.1:8090）
+#   TPC_analysis/ql_tpc.py   : TPC の QL（ブラウザ http://127.0.0.1:8090、FADC は http://127.0.0.1:8090/fadc）
 #   PSA_analysis/src_onoda/ql_psa.py: HA の QL（ブラウザ http://127.0.0.1:8091）
 # 図の PNG は check_output/ に書く。
 #
