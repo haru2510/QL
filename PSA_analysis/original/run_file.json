@@ -1,0 +1,13 @@
+{
+  "workdir": "./",
+
+  "psa": {
+    "ip": [
+	128
+    ]
+  },
+
+  "psa_param_dir": "/home/onoda/PSA_analysis/param/psa_param.csv",
+  "data_dir": "/home/onoda/PSA_analysis/data",
+  "temp_data_dir": "/home/onoda/PSA_analysis/data/tempdata"
+}

@@ -26,3 +26,26 @@
 !/PSA_analysis/src_onoda/sub_scr/
 /PSA_analysis/src_onoda/sub_scr/*
 !/PSA_analysis/src_onoda/sub_scr/get_info.py
+
+# 解析のスクリプト (QL では使わないが、ほかの人に渡すために入れる)
+!/PSA_analysis/src_onoda/decode_runs.py
+!/PSA_analysis/src_onoda/temp_spectra.py
+!/PSA_analysis/src_onoda/peak_search.py
+!/PSA_analysis/src_onoda/grid_spect.py
+!/PSA_analysis/src_onoda/pixel_id.py
+!/PSA_analysis/src_onoda/energy_calib.py
+!/PSA_analysis/src_onoda/check_waveform.py
+!/PSA_analysis/src_onoda/sub_scr/base_decode.py
+!/PSA_analysis/src_onoda/sub_scr/h5_io.py
+!/PSA_analysis/src_onoda/sub_scr/read_temp.py
+!/PSA_analysis/src_onoda/sub_scr/send_rbcp_cmd.py
+
+# 解析が既定で読むパラメータ (HA の SN・HV・温度の較正、run の設定)
+!/PSA_analysis/param/
+/PSA_analysis/param/*
+!/PSA_analysis/param/psa_param_20261029.csv
+!/PSA_analysis/param/psa_param.csv
+!/PSA_analysis/param/run_file.json
+
+# 最初にもらった元のコード (src_onoda はここから直したもの。比べるために残す)
+!/PSA_analysis/original/

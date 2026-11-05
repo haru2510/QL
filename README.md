@@ -96,3 +96,44 @@ cd ~/analysis_sm3_FM
 ```bash
 cd ~/analysis_sm3_FM && git pull
 ```
+
+## 解析のコード（QL 以外）
+
+QL のほかに、HA（PSA）のデータを後から解析するスクリプトも `PSA_analysis/src_onoda/` に置いている。
+詳しい使い方と結果の見方は Notion の「analysis_sm3_FM のコードの解説」にまとめている。
+
+```
+analysis_sm3_FM/
+├── ql_live.sh, ql_sync.sh          QL の起動と全データの同期
+├── TPC_analysis/                   TPC の QL と確認図（check_tpc.py）
+├── PSA_analysis/
+│   ├── src_onoda/                  HA の解析と QL（ここのコードを使う）
+│   │   └── sub_scr/                デコードの下回り、パラメータの読み込み、SiTCP の通信
+│   ├── param/                      psa_param*.csv（HA の SN・HV・温度の較正）、run_file.json
+│   ├── original/                   最初にもらった元のコード（比べるために残す。使わない）
+│   └── （以下は git に入れない）h5_runs*/ など .h5、peak_*/ など結果、logs/
+└── check_output/                   確認図（git に入れない）
+```
+
+HA の解析の流れ（Storage Node の run を .h5 にしてから解析する）:
+
+| 順 | スクリプト | すること |
+| --- | --- | --- |
+| 1 | `decode_runs.py` | 複数の run の `.dat` を HA ごとの `.h5` にデコードする（`psa_decode.py` を使う） |
+| 2 | `check_data.py` | バタフライマップ、hg、peak_id、ペデスタルの確認図 |
+| 3 | `temp_spectra.py` | 温度で区切った hg スペクトルと光電ピークの位置 |
+| 4 | `peak_search.py` | バタフライマップの 64 個のピークを探す |
+| 5 | `grid_spect.py` | 位置補正とピクセルごとのスペクトル |
+| 6 | `pixel_id.py` | 位置補正を新しいデータに当てはめ、ピクセル番号を付ける |
+| 7 | `energy_calib.py` | Cs-137 と Co-60 のピークから ADC → エネルギーの換算係数を出す |
+| - | `check_waveform.py` | `.dat` の生波形を重ねた図 |
+| - | `check_ha_order.py` | Storage Node で HA の `.dat` の trig の戻りを調べる |
+
+```bash
+python3 PSA_analysis/src_onoda/decode_runs.py -i "/mnt/d/UVSOR2026_late/*/20261103_run12/part*" -o PSA_analysis/h5_runs_run12
+python3 PSA_analysis/src_onoda/check_data.py -i PSA_analysis/h5_runs_run12/ha02 --tag run12_ha02
+python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
+```
+
+既定の入力・出力先は、どれもこのリポジトリの中からの相対で決まる。画面に図を出さずに保存だけするときは
+`MPLBACKEND=Agg` を付ける（XLaunch が無いと peak_search などが止まる）。

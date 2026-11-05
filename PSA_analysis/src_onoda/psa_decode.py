@@ -6,7 +6,14 @@ import numpy as np
 from numba import njit,prange
 from natsort import natsorted
 
-from analysis_sm3_FM.PSA_analysis.src_onoda.sub_scr.get_info import (
+# このリポジトリ (analysis_sm3_FM) の場所。既定のパスはここからの相対で決める
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# analysis_sm3_FM をパッケージとして読むので、その親を探索パスに入れる (直接実行しても動くように)
+if os.path.dirname(REPO_DIR) not in sys.path:
+    sys.path.insert(0, os.path.dirname(REPO_DIR))
+
+from analysis_sm3_FM.PSA_analysis.src_onoda.sub_scr.get_info import (  # noqa: E402
     load_run_config,
     load_psa_config,
     get_temp_calibration
@@ -14,12 +21,12 @@ from analysis_sm3_FM.PSA_analysis.src_onoda.sub_scr.get_info import (
 
 numba.set_num_threads(4)
 
-RUN_FILE="/home/onoda/PSA_analysis/param/run_file.json"
+RUN_FILE=os.path.join(REPO_DIR, "PSA_analysis", "param", "run_file.json")
 
 DEFAULT_TEMP_A=np.ascontiguousarray(np.full(6,3.925820834,dtype=np.float32))
 DEFAULT_TEMP_B=np.ascontiguousarray(np.full(6,1230.29635,dtype=np.float32))
 
-DEFAULT_H5_STORE_DIR="/home/onoda/PSA_analysis/h5_store"
+DEFAULT_H5_STORE_DIR=os.path.join(REPO_DIR, "PSA_analysis", "h5_store")
 
 HEADER=b'\xeb\x90\x19\x64'
 FOOTER=b'\x75\x50\x49\x43'

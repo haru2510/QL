@@ -52,8 +52,11 @@ from ql_tpc import (  # noqa: E402
     save_figure,
 )
 
+# このリポジトリ (analysis_sm3_FM) の場所。既定のパスはここからの相対で決める
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DEFAULT_OUTPUT_DIR = "/home/onoda/analysis_sm3_FM/check_output"
+
+DEFAULT_OUTPUT_DIR = os.path.join(REPO_DIR, "check_output")
 
 # HA の clk は 1 MHz の 32 bit カウンタ
 HA_CLOCK = 1e6

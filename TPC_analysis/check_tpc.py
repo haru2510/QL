@@ -29,8 +29,11 @@ from matplotlib.colors import LogNorm
 from natsort import natsorted
 from numba import njit
 
+# このリポジトリ (analysis_sm3_FM) の場所。既定のパスはここからの相対で決める
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-DEFAULT_OUTPUT_DIR = "/home/onoda/analysis_sm3_FM/check_output"
+
+DEFAULT_OUTPUT_DIR = os.path.join(REPO_DIR, "check_output")
 
 HEADER = 0xeb901964
 FOOTER = 0x75504943

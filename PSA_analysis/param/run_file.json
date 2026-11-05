@@ -1,0 +1,13 @@
+{
+  "workdir": "./",
+
+  "psa": {
+    "ip": [
+	128
+    ]
+  },
+
+  "psa_param_dir": "/home/onoda/PSA_analysis/param/psa_param_20261029.csv",
+  "data_dir": "/home/onoda/PSA_analysis/data/cal_psa/run_kyoto/",
+  "temp_data_dir": "/home/onoda/PSA_analysis/data/cal_psa/run_kyoto/tempdata"
+}

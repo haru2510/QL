@@ -20,8 +20,11 @@ import numpy as np
 from matplotlib.colors import LogNorm
 from natsort import natsorted
 
+# このリポジトリ (analysis_sm3_FM) の場所。既定のパスはここからの相対で決める
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DEFAULT_OUTPUT_DIR = "/home/onoda/PSA_analysis/check_output"
+
+DEFAULT_OUTPUT_DIR = os.path.join(REPO_DIR, "PSA_analysis", "check_output")
 
 N_CHANNELS = 6
 N_SAMPLES = 50
