@@ -13,12 +13,18 @@
 #                      HA ごとの直近のトリガレートを書き、レートが高いほどタイルを濃いオレンジにする
 #   ペデスタル       : HA と ch ごとの HG0-3 / LG0-3 のペデスタル (中央値と標準偏差)。
 #                      面ごとに色帯を付け、バタフライマップと同じ色で並べる
+# 別のページ (/temp) には MPPC の温度を出す。
+#   上の段 : HA ごとの温度 (6 センサの平均) の時間変化。run が替わっても消さず、直近 12 時間を持つ
+#   下の段 : HA ごとの今の温度と、6 センサの幅 (最小-最大)
+# 温度は psa_param の HA ごとの係数で較正する。係数が ha02 の写し (CAL_NOTE が placeholder) の HA には
+# "*" を付ける。psa_param に無い HA は psa_decode の既定の係数を使い、"?" を付ける。
 #
 # 解析は psa_decode.py の decode_events をそのまま使う。
 #
 
 import argparse
 import asyncio
+import csv
 import os
 import sys
 import time
@@ -44,7 +50,14 @@ from check_data import (  # noqa: E402
     Y_MAX,
     Y_MIN,
 )
-from psa_decode import DEFAULT_TEMP_A, DEFAULT_TEMP_B, decode_events  # noqa: E402
+from psa_decode import (  # noqa: E402
+    DEFAULT_TEMP_A,
+    DEFAULT_TEMP_B,
+    decode_events,
+    get_sn_from_filename,
+    get_unit_by_sn,
+)
+from sub_scr.get_info import get_temp_calibration, load_psa_config  # noqa: E402
 from ql_tpc import (  # noqa: E402
     RUN_RESET_TRIGGERS,
     prepare_view,
@@ -57,6 +70,14 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 
 DEFAULT_OUTPUT_DIR = os.path.join(REPO_DIR, "check_output")
+DEFAULT_PSA_PARAM = os.path.join(REPO_DIR, "PSA_analysis", "param", "psa_param_20261029.csv")
+
+# HA の番号の範囲 (ha00-ha17)
+N_HA = 18
+
+# 温度の時間変化は、この秒数ごとの平均にまとめて、直近 TEMP_KEEP 秒を持つ
+TEMP_BIN = 10.0
+TEMP_KEEP = 12 * 3600.0
 
 # HA の clk は 1 MHz の 32 bit カウンタ
 HA_CLOCK = 1e6
@@ -135,6 +156,39 @@ watch("pedestal", SUMMARY_MS);
 </html>
 """
 
+# MPPC の温度は別のページ (/temp) に出す
+TEMP_PAGE = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>PSA QL temperature</title>
+<style>
+html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
+img { display: block; width: 100%; height: 100vh; object-fit: contain; }
+#status { position: fixed; right: 8px; bottom: 4px; font: 12px sans-serif; color: #555; }
+</style>
+</head>
+<body>
+<img id="temperature" alt="">
+<div id="status">図を待っています</div>
+<script>
+const statusLine = document.getElementById("status");
+const figure = document.getElementById("temperature");
+function refresh() {
+  const next = new Image();
+  next.onload = () => {
+    figure.src = next.src;
+    statusLine.textContent = "読み込み " + new Date().toLocaleTimeString();
+  };
+  next.src = "/temperature.png?t=" + Date.now();
+}
+refresh();
+setInterval(refresh, SUMMARY_MS);
+</script>
+</body>
+</html>
+"""
+
 
 def parse_args():
 
@@ -147,6 +201,8 @@ def parse_args():
                         help="update interval of the accumulated figures [s]")
     parser.add_argument("--reconnect", type=float, default=3.0, help="reconnect interval [s]")
     parser.add_argument("-o", "--out-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--psa-param", default=DEFAULT_PSA_PARAM,
+                        help="psa_param csv with the temperature calibration of each HA")
     parser.add_argument("--name", default="ql_psa", help="name of the output PNG")
     parser.add_argument("--http-bind", default="127.0.0.1", help="address of the viewer")
     parser.add_argument("--http-port", type=int, default=8091, help="TCP port of the viewer")
@@ -155,14 +211,49 @@ def parse_args():
     return parser.parse_args()
 
 
-def decode_frame(frame):
+def load_temp_calibrations(path):
+    """psa_param から、HA 番号ごとの温度の係数 (temp_a, temp_b) と印を返す。
+
+    印は "" (較正済み)、"*" (係数がほかの HA の写し)、"?" (psa_param に無く、既定の係数を使う)。
+    """
+
+    calibrations = {}
+
+    try:
+        psa_config = load_psa_config({"psa_param_file": path})
+        with open(path, encoding="utf-8") as f:
+            notes = {row.get("HA", "").strip().lower(): row.get("CAL_NOTE", "") for row in csv.DictReader(f)}
+    except (OSError, KeyError, ValueError) as exc:
+        print(f"[WARN] cannot read {path}: {exc}. default temperature calibration is used", flush=True)
+        psa_config, notes = [], {}
+
+    for index in range(N_HA):
+
+        name = f"ha{index:02d}"
+        unit = None
+        if any(unit_config.get("HA", "").lower() == name for unit_config in psa_config):
+            unit = get_unit_by_sn(get_sn_from_filename(f"{name}_00000.dat", psa_config), psa_config)
+
+        if unit is None:
+            calibrations[index] = (DEFAULT_TEMP_A, DEFAULT_TEMP_B, "?")
+            continue
+
+        temp_a, temp_b = get_temp_calibration(unit)
+        mark = "*" if "placeholder" in notes.get(name, "").lower() else ""
+        calibrations[index] = (np.ascontiguousarray(temp_a, dtype=np.float32),
+                               np.ascontiguousarray(temp_b, dtype=np.float32), mark)
+
+    return calibrations
+
+
+def decode_frame(frame, temp_a=DEFAULT_TEMP_A, temp_b=DEFAULT_TEMP_B):
     """1 枠を psa_decode の decode_events で読み、ヒットした ch ごとの値を返す。"""
 
     buf = np.frombuffer(frame, dtype=np.uint8).reshape(1, -1)
     sizes = np.array([len(frame)], dtype=np.int32)
 
     (trig, clock, hit, _, temp, ped, _, hg, _, x_hg, y_hg, _, _,
-     peak_id, _, satu_h, _, adc) = decode_events(buf, sizes, False, DEFAULT_TEMP_A, DEFAULT_TEMP_B, True)
+     peak_id, _, satu_h, _, adc) = decode_events(buf, sizes, False, temp_a, temp_b, True)
 
     hits = []
 
@@ -217,8 +308,49 @@ class HaState:
         state["ped"] = np.array(self.ped, dtype=np.float32).reshape(-1, len(SIGNALS))
         state["trig"] = np.array(self.trig, dtype=np.int64)
         state["seconds"] = np.array(self.seconds, dtype=np.float64)
+        state["temp"] = np.array(self.temp, dtype=np.float32).reshape(-1, 6)
 
         return state
+
+
+class TempHistory:
+    """1 台の HA の温度の時間変化。TEMP_BIN 秒ごとに、6 センサそれぞれの和とイベント数をまとめる。"""
+
+    def __init__(self):
+
+        self.bins = {}
+
+    def add(self, now, temp):
+
+        key = int(now // TEMP_BIN)
+        total, count = self.bins.get(key, (np.zeros(6), 0))
+        self.bins[key] = (total + temp, count + 1)
+
+        # 新しいビンができたときだけ、TEMP_KEEP より古いビンを捨てる
+        if count == 0:
+            oldest = int((now - TEMP_KEEP) // TEMP_BIN)
+            for old in [k for k in self.bins if k < oldest]:
+                del self.bins[old]
+
+    def snapshot(self):
+        """(時刻 [unix s], 6 センサの平均, センサごとの平均 [n, 6]) を時刻の順に返す。"""
+
+        keys = sorted(self.bins)
+        times = np.array([(k + 0.5) * TEMP_BIN for k in keys])
+        sensors = np.array([self.bins[k][0] / self.bins[k][1] for k in keys]).reshape(-1, 6)
+
+        return times, sensors.mean(axis=1), sensors
+
+
+def recent_temp(state):
+    """直近 RATE_WINDOW 秒の温度 (6 センサの平均) [℃]。"""
+
+    if state is None or len(state["temp"]) == 0:
+        return None
+
+    selected = state["seconds"] >= state["seconds"][-1] - RATE_WINDOW
+
+    return float(state["temp"][selected].mean())
 
 
 def butterfly_counts(state, ch, bins):
@@ -251,7 +383,7 @@ def recent_rate(state):
     return (trig[selected][-1] - trig[selected][0]) / span if span > 0 else None
 
 
-def draw_ha_tile(tile, index, state, max_rate):
+def draw_ha_tile(tile, index, state, max_rate, temp_mark=""):
     """一覧の図の 1 台分。6 ch のバタフライマップを 2 行 3 列で小さく描き、ヒットの無い ch は赤く塗る。
 
     どの HA に集中しているかが分かるよう、トリガレートを題に書き、全 HA で最も高いレートに対する
@@ -260,13 +392,15 @@ def draw_ha_tile(tile, index, state, max_rate):
 
     n_hits = 0 if state is None else len(state["ch"])
     rate = None if state is None else recent_rate(state)
+    temp = recent_temp(state)
+    temp_text = "" if temp is None else f"  {temp:.1f}\u00b0C{temp_mark}"
 
     if state is None:
         label = f"ha{index:02d}  no data"
     elif rate is None:
-        label = f"ha{index:02d}  -- Hz  ({n_hits} hits)"
+        label = f"ha{index:02d}  -- Hz{temp_text}  ({n_hits} hits)"
     else:
-        label = f"ha{index:02d}  {rate:.3g} Hz  ({n_hits} hits)"
+        label = f"ha{index:02d}  {rate:.3g} Hz{temp_text}  ({n_hits} hits)"
         if max_rate:
             tile.set_facecolor(RATE_COLORS(0.05 + 0.6 * rate / max_rate))
 
@@ -297,7 +431,7 @@ def draw_ha_tile(tile, index, state, max_rate):
         ax.set_title(f"ch{ch}  {n_ch}", fontsize=7, pad=1)
 
 
-def draw_overview_figure(states, title, out_path):
+def draw_overview_figure(states, title, out_path, marks=None):
     """全 HA を、底面を中央に、側面をその上下左右に置いた十字形に並べる。
 
     配置にある HA は、データがまだ無くても灰色の枠を出す。配置に無い HA は四隅に置く。
@@ -317,14 +451,14 @@ def draw_overview_figure(states, title, out_path):
         tiles = np.atleast_1d(group.subfigures(n_rows, n_cols, wspace=0.03, hspace=0.03)).ravel()
 
         for tile, index in zip(tiles, members):
-            draw_ha_tile(tile, index, states.get(index), max_rate)
+            draw_ha_tile(tile, index, states.get(index), max_rate, (marks or {}).get(index, ""))
 
     grouped = {index for _, _, members in HA_GROUPS for index in members}
     spares = [index for index in states if index not in grouped]
 
     for place, index in zip(SPARE_PLACES, spares):
         tile = fig.add_subfigure(grid[place], facecolor="#f2f2f2", edgecolor="0.6", linewidth=1)
-        draw_ha_tile(tile, index, states[index], max_rate)
+        draw_ha_tile(tile, index, states[index], max_rate, (marks or {}).get(index, ""))
 
     fig.suptitle(title, fontsize=11)
 
@@ -397,14 +531,86 @@ def draw_pedestal_figure(states, title, out_path):
     save_figure(fig, out_path)
 
 
+def draw_temperature_figure(histories, marks, title, out_path):
+    """MPPC の温度。上の段は HA ごとの時間変化 (6 センサの平均)、下の段は今の温度と 6 センサの幅。
+
+    並びと色の帯はバタフライマップの面の順 (Bottom, N, E, S, W)。
+    """
+
+    grouped = [(label, color, members) for label, color, members in HA_GROUPS]
+    spares = [index for index in histories if all(index not in members for _, _, members in HA_GROUPS)]
+    if spares:
+        grouped.append(("other", "#f2f2f2", spares))
+    order = [index for _, _, members in grouped for index in members]
+
+    fig = Figure(figsize=(14, 9), constrained_layout=True)
+    ax_time, ax_now = fig.subplots(2, 1, gridspec_kw={"height_ratios": [1.4, 1]})
+    now = time.time()
+
+    # 上の段: 時間変化。横軸は今からの時間 [分]
+    for number, index in enumerate(order):
+        if index not in histories:
+            continue
+        times, mean, _ = histories[index].snapshot()
+        if len(times) == 0:
+            continue
+        style = "--" if marks.get(index) else "-"
+        ax_time.plot((times - now) / 60, mean, style, marker=".", markersize=3,
+                     color=colormaps["tab20"](number % 20), linewidth=1,
+                     label=f"ha{index:02d}{marks.get(index, '')}")
+
+    ax_time.set_xlabel("time from now [min]")
+    ax_time.set_ylabel("MPPC temperature [\u00b0C] (mean of 6 sensors)")
+    ax_time.grid(alpha=0.3)
+    if ax_time.lines:
+        ax_time.legend(fontsize=7, ncol=9, loc="upper left")
+    ax_time.set_title("temperature history (10 s average, kept for 12 h, not reset by a new run)", fontsize=10)
+
+    # 下の段: 今の温度 (直近 RATE_WINDOW 秒) と 6 センサの最小-最大
+    positions = {index: number for number, index in enumerate(order)}
+    for label, color, members in grouped:
+        first, last = positions[members[0]] - 0.5, positions[members[-1]] + 0.5
+        ax_now.axvspan(first, last, color=color, zorder=0)
+        ax_now.text((first + last) / 2, 1.01, label, transform=ax_now.get_xaxis_transform(),
+                    ha="center", va="bottom", fontsize=9, fontweight="bold")
+
+    for index, history in histories.items():
+        times, mean, sensors = history.snapshot()
+        recent = times >= now - RATE_WINDOW
+        if not recent.any():
+            recent = slice(-1, None)
+        value = float(mean[recent].mean())
+        sensor_now = sensors[recent].mean(axis=0)
+        x = positions[index]
+        ax_now.vlines(x, sensor_now.min(), sensor_now.max(), color="0.4", linewidth=3, zorder=2)
+        ax_now.plot(x, value, "o", color="C3" if not marks.get(index) else "0.5", zorder=3)
+        ax_now.text(x, sensor_now.max(), f"{value:.1f}{marks.get(index, '')}", ha="center", va="bottom",
+                    fontsize=8, zorder=4)
+
+    ax_now.set_xticks(range(len(order)), [f"ha{index:02d}" for index in order], fontsize=8, rotation=90)
+    ax_now.set_xlim(-0.5, len(order) - 0.5)
+    ax_now.set_ylabel("MPPC temperature [\u00b0C]")
+    ax_now.grid(alpha=0.3, axis="y")
+    ax_now.set_title(f"now (last {RATE_WINDOW:.0f} s): point = mean of 6 sensors, bar = min-max of the sensors. "
+                     "* calibration copied from another HA, ? not in psa_param", fontsize=9, pad=16)
+
+    fig.suptitle(title, fontsize=10)
+
+    save_figure(fig, out_path)
+
+
 class QuickLook:
 
     def __init__(self, args):
 
         self.args = args
         self.paths = {name: os.path.join(args.out_dir, f"{args.name}_{name}.png")
-                      for name in ("overview", "pedestal")}
+                      for name in ("overview", "pedestal", "temperature")}
         self.bad_packets = 0
+        self.calibrations = load_temp_calibrations(args.psa_param)
+        self.marks = {index: mark for index, (_, _, mark) in self.calibrations.items()}
+        # 温度の時間変化は run が替わっても消さない
+        self.temp_histories = {}
         self.reset()
 
     def reset(self):
@@ -415,8 +621,10 @@ class QuickLook:
 
     def add(self, _side, index, frame):
 
+        temp_a, temp_b, _ = self.calibrations.get(index, (DEFAULT_TEMP_A, DEFAULT_TEMP_B, "?"))
+
         try:
-            trig, clock, temp, hits = decode_frame(frame)
+            trig, clock, temp, hits = decode_frame(frame, temp_a, temp_b)
         except Exception:
             self.bad_packets += 1
             return
@@ -429,6 +637,7 @@ class QuickLook:
 
         self.latest[index] = max(self.latest.get(index, -1), trig)
         self.states.setdefault(index, HaState()).add(trig, clock, temp, hits)
+        self.temp_histories.setdefault(index, TempHistory()).add(time.time(), temp)
         self.n_events += 1
 
     def count_bad(self):
@@ -459,8 +668,10 @@ class QuickLook:
             # 描画に失敗しても受信は止めない
             try:
                 states, title = self.snapshot()
-                await asyncio.to_thread(draw_overview_figure, states, title, self.paths["overview"])
+                await asyncio.to_thread(draw_overview_figure, states, title, self.paths["overview"], self.marks)
                 await asyncio.to_thread(draw_pedestal_figure, states, title, self.paths["pedestal"])
+                await asyncio.to_thread(draw_temperature_figure, dict(self.temp_histories), self.marks, title,
+                                        self.paths["temperature"])
                 print(f"[DRAW] {title}", flush=True)
             except Exception:
                 traceback.print_exc()
@@ -472,7 +683,7 @@ async def run(args):
 
     # start_viewer はページの EVENT_MS も埋める。このページには 1 イベントの図が無いので、同じ間隔にする
     args.event_update = args.update
-    prepare_view(args, quick_look.paths, PAGE)
+    prepare_view(args, quick_look.paths, PAGE, {"/temp": TEMP_PAGE})
 
     await asyncio.gather(receive_loop(args, "h", quick_look.add, quick_look.count_bad),
                          quick_look.update_loop())

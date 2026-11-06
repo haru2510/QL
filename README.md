@@ -38,7 +38,9 @@ cd ~/analysis_sm3_FM
 最初から積算する。
 
 ブラウザで TPC は http://127.0.0.1:8090 、HA は http://127.0.0.1:8091 を開く。TPC の FADC 波形と
-その積算は http://127.0.0.1:8090/fadc に出る。起動するとこの 3 つのページが開く。
+その積算は http://127.0.0.1:8090/fadc 、HA の MPPC の温度は http://127.0.0.1:8091/temp に出る。
+起動するとこの 4 つのページが開く。温度は `PSA_analysis/param/psa_param_20261029.csv` の HA ごとの係数で
+較正する（係数がほかの HA の写しの HA には `*`、psa_param に無い HA には `?` を付ける）。
 図の PNG は `check_output/` に書く。
 
 ## ファイル
