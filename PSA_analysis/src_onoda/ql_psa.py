@@ -611,7 +611,17 @@ class QuickLook:
         self.marks = {index: mark for index, (_, _, mark) in self.calibrations.items()}
         # 温度の時間変化は run が替わっても消さない
         self.temp_histories = {}
+        self.run_id = None
         self.reset()
+
+    def change_run(self, run_id):
+        """ql_stream.py から run が替わったと知らされたら、積算を最初からやり直す。"""
+
+        if run_id != self.run_id:
+            if self.run_id is not None:
+                print(f"[RUN] {self.run_id} -> {run_id}. restart the accumulation", flush=True)
+            self.run_id = run_id
+            self.reset()
 
     def reset(self):
 
@@ -619,7 +629,11 @@ class QuickLook:
         self.latest = {}
         self.n_events = 0
 
-    def add(self, _side, index, frame):
+    def add(self, side, index, frame):
+
+        if side == "r":
+            self.change_run(frame.decode(errors="replace"))
+            return
 
         temp_a, temp_b, _ = self.calibrations.get(index, (DEFAULT_TEMP_A, DEFAULT_TEMP_B, "?"))
 
@@ -685,7 +699,7 @@ async def run(args):
     args.event_update = args.update
     prepare_view(args, quick_look.paths, PAGE, {"/temp": TEMP_PAGE})
 
-    await asyncio.gather(receive_loop(args, "h", quick_look.add, quick_look.count_bad),
+    await asyncio.gather(receive_loop(args, "hr", quick_look.add, quick_look.count_bad),
                          quick_look.update_loop())
 
 

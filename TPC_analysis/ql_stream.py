@@ -6,6 +6,8 @@
 # 同期 (ql_sync.sh) を待たないので、トリガレートが高くても数秒の遅れで表示できる。
 # 流す形式は ql_replay.py / ql_follow.py と同じで、ql_tpc.py と ql_psa.py は --host 127.0.0.1 で
 # 同時につないでよい。途中からつないだ受け手にも、その run でそれまでに送った枠を先に送る。
+# run が替わると、ノードから届いた run ID のパケット (側 'r') を受け手へも流す。受け手はそれで積算を
+# 最初からやり直す (trig が戻ったかどうかでは、短い run のあとに替わったことが分からないため)。
 #
 # ql_tpc.py は、全ボードを通した N_trg の最大値から大きく戻ると新しい run とみなす。2 台のノードの
 # 枠は別々に届くので、TPC の枠は全ボードの進みがそろった N_trg まで待ち、N_trg の順に送る。
@@ -99,6 +101,8 @@ class Merger:
                 self.run_id = run_id
                 self.reset()
                 self.broadcaster.clear()
+                # 受け手に run が替わったことを知らせる。履歴の先頭にも残るので、あとからつないだ受け手にも届く
+                await self.broadcaster.send([raw])
             return
 
         # 古い run を追いかけているノードの枠は捨てる (すぐに新しい run へ移ってくる)

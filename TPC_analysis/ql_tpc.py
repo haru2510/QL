@@ -764,7 +764,17 @@ class QuickLook:
         self.paths = {name: os.path.join(args.out_dir, f"{args.name}_{name}.png")
                       for name in ("event", "stats", "summary", "fadc_event", "fadc_map")}
         self.bad_packets = 0
+        self.run_id = None
         self.reset()
+
+    def change_run(self, run_id):
+        """ql_stream.py から run が替わったと知らされたら、積算を最初からやり直す。"""
+
+        if run_id != self.run_id:
+            if self.run_id is not None:
+                print(f"[RUN] {self.run_id} -> {run_id}. restart the accumulation", flush=True)
+            self.run_id = run_id
+            self.reset()
 
     def reset(self):
 
@@ -774,6 +784,10 @@ class QuickLook:
         self.n_packets = 0
 
     def add(self, side, index, frame):
+
+        if side == "r":
+            self.change_run(frame.decode(errors="replace"))
+            return
 
         board = self.boards.get((side, index))
 
@@ -868,7 +882,7 @@ async def run(args):
 
     prepare_view(args, quick_look.paths, VIEW_PAGE, {"/fadc": FADC_PAGE})
 
-    await asyncio.gather(receive_loop(args, "ac", quick_look.add, quick_look.count_bad),
+    await asyncio.gather(receive_loop(args, "acr", quick_look.add, quick_look.count_bad),
                          quick_look.update_loop())
 
 
