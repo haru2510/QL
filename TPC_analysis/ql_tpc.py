@@ -28,11 +28,13 @@
 
 import argparse
 import asyncio
+import fcntl
 import http.server
 import os
 import shutil
 import struct
 import subprocess
+import tempfile
 import threading
 import time
 import traceback
@@ -246,6 +248,8 @@ def thinned_rate(all_boards, time_origin, args):
 # (タブはそのまま残り、QL を起動し直すと表示を再開する)
 PING_MS = 1000
 OPEN_WAIT = 2.5     # 起動してから、開いているタブからの知らせを待つ時間 [s]
+OPEN_INTERVAL = 1.5  # ブラウザで 1 つ開いてから次を開くまでの間 [s]
+OPEN_LOCK = os.path.join(tempfile.gettempdir(), f"ql_open_browser_{os.getuid()}.lock")
 HEARTBEAT_SCRIPT = f"""<script>
 setInterval(() => {{
   fetch("/ping", {{cache: "no-store"}}).catch(() => {{
@@ -637,12 +641,23 @@ def draw_summary_figure(boards, out_path, args):
 
 
 def open_browser(url):
+    """ブラウザで url を開く。
 
-    # WSL では Windows 側のブラウザで開く
-    if shutil.which("explorer.exe"):
-        subprocess.Popen(["explorer.exe", url])
-    else:
-        webbrowser.open(url)
+    ql_tpc.py と ql_psa.py が同時にいくつも開くと、立ち上がっている途中のブラウザが一部を取りこぼす。
+    ほかのプロセスとも 1 つずつ順に開き、開いたあと OPEN_INTERVAL 秒あけてから次に渡す。
+    """
+
+    with open(OPEN_LOCK, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            # WSL では Windows 側のブラウザで開く
+            if shutil.which("explorer.exe"):
+                subprocess.Popen(["explorer.exe", url])
+            else:
+                webbrowser.open(url)
+            time.sleep(OPEN_INTERVAL)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def prepare_view(args, paths, page=VIEW_PAGE, extra_pages=None):
