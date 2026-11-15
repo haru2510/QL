@@ -36,6 +36,7 @@ import subprocess
 import threading
 import time
 import traceback
+import urllib.parse
 import webbrowser
 import zlib
 from collections import OrderedDict
@@ -240,6 +241,22 @@ def thinned_rate(all_boards, time_origin, args):
     return edges, rate
 
 
+# どのページにも足す。開いているタブがあることを PING_MS ごとにサーバーへ知らせ、起動し直した QL が
+# 同じページのタブをもう 1 つ開かないようにする。QL が止まっている間は、そのことを右下に出す
+# (タブはそのまま残り、QL を起動し直すと表示を再開する)
+PING_MS = 1000
+OPEN_WAIT = 2.5     # 起動してから、開いているタブからの知らせを待つ時間 [s]
+HEARTBEAT_SCRIPT = f"""<script>
+setInterval(() => {{
+  fetch("/ping", {{cache: "no-store"}}).catch(() => {{
+    const line = document.getElementById("status");
+    if (line) line.textContent = "QL が止まっています（起動し直すと、このタブで表示を再開します）";
+  }});
+}}, {PING_MS});
+</script>
+"""
+
+
 class ViewHandler(http.server.BaseHTTPRequestHandler):
     """ブラウザに表示用のページと最新の PNG を返す。"""
 
@@ -247,7 +264,16 @@ class ViewHandler(http.server.BaseHTTPRequestHandler):
 
         path = self.path.split("?")[0]
 
-        if path in self.server.pages:
+        # どのページのタブが開いているかを、ページからの要求の Referer で覚える
+        referer = urllib.parse.urlsplit(self.headers.get("Referer", "")).path
+        if referer in self.server.pages:
+            self.server.open_pages.add(referer)
+
+        if path == "/ping":
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+        elif path in self.server.pages:
             self.reply("text/html; charset=utf-8", self.server.pages[path])
         elif path in self.server.images:
             try:
@@ -273,7 +299,7 @@ class ViewHandler(http.server.BaseHTTPRequestHandler):
 
 
 def start_viewer(args, paths, page=VIEW_PAGE, extra_pages=None):
-    """表示用の HTTP サーバーを別スレッドで動かし、URL を返す。
+    """表示用の HTTP サーバーを別スレッドで動かし、URL とサーバーを返す。
 
     page は / に出す。extra_pages ({"/fadc": ページ} など) があれば、その URL にも出す。
     """
@@ -281,9 +307,11 @@ def start_viewer(args, paths, page=VIEW_PAGE, extra_pages=None):
     server = http.server.ThreadingHTTPServer((args.http_bind, args.http_port), ViewHandler)
     server.daemon_threads = True
     server.images = {f"/{name}.png": path for name, path in paths.items()}
+    server.open_pages = set()
     server.pages = {url: (text
                           .replace("EVENT_MS", str(int(args.event_update * 1000)))
                           .replace("SUMMARY_MS", str(int(args.update * 1000)))
+                          .replace("</body>", HEARTBEAT_SCRIPT + "</body>")
                           .encode("utf-8"))
                     for url, text in {"/": page, **(extra_pages or {})}.items()}
 
@@ -291,7 +319,7 @@ def start_viewer(args, paths, page=VIEW_PAGE, extra_pages=None):
 
     host = "127.0.0.1" if args.http_bind == "0.0.0.0" else args.http_bind
 
-    return f"http://{host}:{args.http_port}/"
+    return f"http://{host}:{args.http_port}/", server
 
 
 def parse_event(frame):
@@ -627,13 +655,22 @@ def prepare_view(args, paths, page=VIEW_PAGE, extra_pages=None):
         if os.path.exists(path):
             os.remove(path)
 
-    url = start_viewer(args, paths, page, extra_pages)
-    urls = [url] + [url.rstrip("/") + extra for extra in (extra_pages or {})]
+    url, server = start_viewer(args, paths, page, extra_pages)
+    pages = ["/"] + list(extra_pages or {})
 
-    for each in urls:
-        print(f"[VIEW] {each}", flush=True)
-        if not args.no_open:
-            open_browser(each)
+    if not args.no_open:
+        # 前に開いたタブが残っていれば、それを使い続ける (タブを増やさない)
+        time.sleep(OPEN_WAIT)
+
+    for each in pages:
+        full = url.rstrip("/") + each
+        if args.no_open:
+            print(f"[VIEW] {full}", flush=True)
+        elif each in server.open_pages:
+            print(f"[VIEW] {full} (開いているタブを使う)", flush=True)
+        else:
+            print(f"[VIEW] {full}", flush=True)
+            open_browser(full)
 
 
 async def receive_packets(reader, sides, on_frame, on_bad):
