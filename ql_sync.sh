@@ -8,6 +8,7 @@
 #   ./ql_sync.sh --since 20261101        # この日付より前の run は送らない
 #   ./ql_sync.sh --dry-run               # 転送されるファイルだけ見る
 #   QL_DEST=/data/ql ./ql_sync.sh
+# ターミナルで実行すると、転送中は全体の進み具合（量、%、速さ）を 1 行で上書きして出す。
 #
 # 同期するもの: Storage Node の /data/smile_ics/storage_gX → $QL_DEST/storage_gX/
 #   - 書き込み中のファイル（*.tmp）も送る。データのファイル（*.raw, *.dat, *.tmp）は後ろに
@@ -97,6 +98,22 @@ DATA_FILTER=(--append --include='*/' --include='*.raw' --include='*.dat' --inclu
 # データ以外。書き換わることがあるので --append は使わない
 META_FILTER=(--exclude='*.raw' --exclude='*.dat' --exclude='*.tmp')
 
+# ターミナルで実行しているときだけ、転送中の進み具合を出す（ログに書くときや dry-run では出さない）
+SHOW_PROGRESS=0
+[ -t 1 ] && [ "$DRY_RUN" -eq 0 ] && { : >/dev/tty; } 2>/dev/null && SHOW_PROGRESS=1
+
+# rsync --info=progress2 の出力から進み具合の行（\r 区切り）を端末へ出し、それ以外はそのまま返す
+show_progress() {
+  awk -v label="$1" -v node="$2" -v RS='[\r\n]+' '
+    / to-chk=| ir-chk=|%  *[0-9.]+[kMG]?B\/s/ {
+      gsub(/^ +/, "")
+      printf "\r\033[K  %-26s %s: %s", label, node, $0 > "/dev/tty"
+      fflush("/dev/tty")
+      next
+    }
+    { print }'
+}
+
 # rsync を 1 回走らせ、1 行で結果を出す
 run_rsync() {
   local label=$1 node=$2 src=$3 dest=$4 out status files size
@@ -105,7 +122,16 @@ run_rsync() {
   [ "$DRY_RUN" -eq 1 ] && opts+=(--dry-run --itemize-changes)
 
   mkdir -p "$dest"
-  out=$(rsync "${opts[@]}" "$node:$src" "$dest" 2>&1 </dev/null) && status=0 || status=$?
+  if [ "$SHOW_PROGRESS" -eq 1 ]; then
+    # 転送中は、全体の進み具合を同じ行に上書きして出す。結果の集計には使わない
+    out=$( { rsync "${opts[@]}" --info=progress2 "$node:$src" "$dest" 2>&1 </dev/null
+             echo "__rsync_status $?"; } | show_progress "$label" "$node")
+    status=$(sed -n 's/^__rsync_status //p' <<<"$out")
+    status=${status:-1}
+    printf '\r\033[K' >/dev/tty
+  else
+    out=$(rsync "${opts[@]}" "$node:$src" "$dest" 2>&1 </dev/null) && status=0 || status=$?
+  fi
   # 24 は転送中に元のファイルが消えた場合（collect_runs.sh の削除など）。次回で揃うので失敗にしない
   if [ "$status" -ne 0 ] && [ "$status" -ne 24 ]; then
     printf '  %-26s %s: 失敗 (rsync %d)\n' "$label" "$node" "$status"
