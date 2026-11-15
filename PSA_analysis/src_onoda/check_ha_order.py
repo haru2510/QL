@@ -31,7 +31,7 @@ for seq, name in files:
             nxt = data.find(H, pos + 1)
             if nxt < 0: break
             pos = nxt; continue
-        size = 40 if data[pos + 36:pos + 40] == F else 840
+        size = next((s for s in range(40, 4841, 800) if data[pos + s - 4:pos + s] == F), 40)
         trig = int.from_bytes(data[pos + 4:pos + 8], "big"); n += 1
         first = trig if first is None else first
         if prev is not None and trig + 1000 < prev:

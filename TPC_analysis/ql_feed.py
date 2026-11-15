@@ -44,8 +44,8 @@ TPC_FADC_SIZE = 8 * 512
 TPC_RECORD_SIZE = 20
 TPC_MAX_RECORDS = 1024
 
-# HA の枠の大きさ (ヒット無し, ヒットあり)
-HA_FRAME_SIZES = (40, 840)
+# HA の枠の大きさ。40 byte にヒットした ch ごと 800 byte の波形が付く (ヒット無し 40, 1 ch 840, ..., 6 ch 4840)
+HA_FRAME_SIZES = tuple(40 + 800 * n_hits for n_hits in range(7))
 
 TPC_PATTERN = re.compile(r"tpc_enc_([ac])(\d+)_\d+\.raw$")
 HA_PATTERN = re.compile(r"ha(\d+)_\d+\.dat$")
