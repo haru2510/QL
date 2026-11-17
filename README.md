@@ -34,6 +34,12 @@ cd ~/analysis_sm3_FM
 同期先は `QL_DEST`（既定 `~/smile_ics_ql`）で変える。全データの同期はノードと回線への負荷が
 大きいので、RUN 中に要らなければ RUN の合間に 1 回だけ実行する。
 
+`ql_sync.sh` は zeno の `/opt/smile-ics/data/scaler/tcu_scaler*.jsonl` も
+`$QL_DEST/scaler/` へ同期する。生カウンター（`dead_time_10mhz`、`real_time_10mhz`）と
+差分レート（`dead_time_ratio`）の最新確認用・時次ファイルを含む。`--since` は run のみに適用し、
+Scaler は全期間を同期する。取得元は `QL_SCALER_NODE` と `QL_SCALER_DIR` で変更でき、
+`QL_SCALER_NODE=none ./ql_sync.sh` で Scaler の同期を無効にできる。
+
 起動したときに走っている run は、起動した時点から積算する。そのあとに始まった run は
 最初から積算する。
 
@@ -77,16 +83,18 @@ cd ~/analysis_sm3_FM
    pip install numpy matplotlib natsort numba h5py
    ```
 
-3. `~/.ssh/config` に magallan と Storage Node を書き、公開鍵を 3 台に登録する
+3. `~/.ssh/config` に magallan、Storage Node、zeno を書き、公開鍵を 4 台に登録する
    （`ssh-copy-id magallan` などで登録できる）。
 
    ```
    Host magallan
      HostName 192.168.1.xx
      User msgc
-   Host calltt killua
+   Host calltt killua zeno
      User msgc
      ProxyJump magallan
+   Host zeno
+     HostName 192.168.100.11
    Host calltt
      HostName 192.168.100.12
    Host killua

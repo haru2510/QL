@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Storage Node（calltt, killua）の run を、この QL 用 PC へ同期する。QL 用 PC で実行する。
+# Storage Node（calltt, killua）の run と zeno の Scaler を QL 用 PC へ同期する。
 # smile-ics のプロセスとは独立に動き、RUN 中でも使える。
 #
 #   ./ql_sync.sh                         # 1 回だけ同期する
@@ -9,6 +9,10 @@
 #   ./ql_sync.sh --dry-run               # 転送されるファイルだけ見る
 #   QL_DEST=/data/ql ./ql_sync.sh
 # ターミナルで実行すると、転送中は全体の進み具合（量、%、速さ）を 1 行で上書きして出す。
+#
+# Scaler: zeno:/opt/smile-ics/data/scaler/tcu_scaler*.jsonl → $QL_DEST/scaler/
+#   - 生カウンターと差分レートの JSONL を同期する。--since は run のみに適用する。
+#   - QL_SCALER_NODE / QL_SCALER_DIR で取得元を変更できる。QL_SCALER_NODE=none で無効。
 #
 # 同期するもの: Storage Node の /data/smile_ics/storage_gX → $QL_DEST/storage_gX/
 #   - 書き込み中のファイル（*.tmp）も送る。データのファイル（*.raw, *.dat, *.tmp）は後ろに
@@ -29,16 +33,18 @@
 #        Host magallan
 #          HostName 192.168.1.xx
 #          User msgc
-#        Host calltt killua
+#        Host calltt killua zeno
 #          User msgc
 #          ProxyJump magallan
+#        Host zeno
+#          HostName 192.168.100.11
 #        Host calltt
 #          HostName 192.168.100.12
 #        Host killua
 #          HostName 192.168.100.13
-#   2. QL 用 PC の公開鍵を 3 台に登録する
-#        ssh-copy-id magallan; ssh-copy-id calltt; ssh-copy-id killua
-#   3. QL 用 PC と Storage Node の両方に rsync を入れる
+#   2. QL 用 PC の公開鍵を 4 台に登録する
+#        ssh-copy-id magallan; ssh-copy-id calltt; ssh-copy-id killua; ssh-copy-id zeno
+#   3. QL 用 PC と 各ノードに rsync を入れる
 
 set -euo pipefail
 
@@ -49,6 +55,9 @@ QL_NODES=${QL_NODES:-"calltt:storage_g0 killua:storage_g1"}
 # QL_SINCE: この日付（YYYYMMDD、JST）より前の run は送らない。空なら全 run を送る
 QL_SINCE=${QL_SINCE:-}
 SRC_ROOT=/data/smile_ics
+# Scaler の取得元（systemd の SMILE_ICS_SCALER_OUTPUT のディレクトリ）
+QL_SCALER_NODE=${QL_SCALER_NODE:-zeno}
+QL_SCALER_DIR=${QL_SCALER_DIR:-/opt/smile-ics/data/scaler}
 
 INTERVAL=0
 DRY_RUN=0
@@ -228,6 +237,13 @@ sync_once() {
     run_rsync "$process_id（データ以外）" "$node" "$SRC_ROOT/$process_id/" "$QL_DEST/$process_id/" \
       ${EXCLUDES[@]+"${EXCLUDES[@]}"} "${META_FILTER[@]}" || rc=1
   done
+
+  # 最新確認用 JSONL は毎時切り詰められるため、--append を使わない。
+  # 時次ファイルも通常の rsync で同期し、取得元で消えてもローカルには残す。
+  if [ "$QL_SCALER_NODE" != none ]; then
+    run_rsync 'Scaler（カウンター・レート）' "$QL_SCALER_NODE" "${QL_SCALER_DIR%/}/" \
+      "$QL_DEST/scaler/" --include='/tcu_scaler*.jsonl' --exclude='*' || rc=1
+  fi
 
   printf '  1 周 %d 秒\n' $((SECONDS - started))
   df -h "$QL_DEST" | tail -1 | awk '{printf "  空き容量 %s / %s (%s 使用)\n", $4, $2, $5}'
