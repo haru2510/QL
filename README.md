@@ -138,12 +138,32 @@ HA の解析の流れ（Storage Node の run を .h5 にしてから解析する
 | 7 | `energy_calib.py` | Cs-137 と Co-60 のピークから ADC → エネルギーの換算係数を出す |
 | - | `check_waveform.py` | `.dat` の生波形を重ねた図 |
 | - | `check_ha_order.py` | Storage Node で HA の `.dat` の trig の戻りを調べる |
+| - | `pair_polarization.py` | 偏光ビーム試験の簡易解析。raw の `.dat` を直接読み、HA のヒットが 2 つのイベントで 2 点（ブロックの中心）を結んだ線のビーム軸まわりの方位角から、偏光の変調と向きを fit する（下を参照） |
 
 ```bash
 python3 PSA_analysis/src_onoda/decode_runs.py -i "/mnt/d/UVSOR2026_late/*/20261103_run12/part*" -o PSA_analysis/h5_runs_run12
 python3 PSA_analysis/src_onoda/check_data.py -i PSA_analysis/h5_runs_run12/ha02 --tag run12_ha02
 python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
 ```
+
+### 偏光ビーム試験の簡易解析（`pair_polarization.py`）
+
+対生成のイベントで、HA のヒットが 2 つ（`--n-hits`）のものを選び、2 点を結んだ線をビームに垂直な面に射影した方位角 φ（0〜180°）の分布を `A [1 + μ cos 2(φ − φ0)]` で fit する。
+`.h5` を作らずに raw（`ha<NN>_<番号>.dat`）を直接読み、ボード同士はトリガーカウンタでそろえる。1 つのランのボードは 2 つの storage に分かれるので、`-i` に両方を渡す。
+
+```bash
+python3 PSA_analysis/src_onoda/pair_polarization.py \
+  -i /mnt/nas_eureka/SMILE-3FM_data/<日付>/calltt/<日付>_runNN /mnt/nas_eureka/SMILE-3FM_data/<日付>/killua/<日付>_runNN \
+  --beam-dir 0 0 1 --ref-axis 1 0 0 -o pair_runNN
+# 偏光なし（または偏光の向きを回した）ランと比べる: --reference <そのランの calltt と killua>
+```
+
+- ヒットの位置はブロック（8×8 の結晶）の中心で、`PSA_analysis/param/geometry_sm3.csv`（EricaNext の `calib/psa/geometry.csv` の写し）から取る。e± は HG が飽和しやすく、飽和すると重心がブロックの中央に寄るので、ピクセルまでは求めない。
+- ch は ADC 番号（1, 2, 4, 8, 16, 32 → 0〜5、EricaNext と同じ）。`psa_decode.py` の `.h5` の ch（5 − ch）とは逆なので注意。
+- 座標は検出器の座標（X: 東、Y: 南、Z: 下）。`--beam-dir` はビームの向き、`--ref-axis` は φ = 0 の軸（ビームに垂直な面に射影して使う）。
+- ヒットは HG ≥ `--hg-min`（既定 1000 ADC）で、peak_id がボードごとの最頻値 ± `--peak-id-window`（既定 3）のもの。
+- 検出器の形（HA の並び）だけでも φ の分布は平らにならないので、偏光の大きさは `--reference` のランとの比（`N / N_ref`）の fit で見る。
+- 出力: `<out>.png`（φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<out>_pairs.csv`（ペアの一覧）、`<out>.json`（fit の結果と条件）。
 
 既定の入力・出力先は、どれもこのリポジトリの中からの相対で決まる。画面に図を出さずに保存だけするときは
 `MPLBACKEND=Agg` を付ける（XLaunch が無いと peak_search などが止まる）。
