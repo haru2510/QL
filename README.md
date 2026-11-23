@@ -151,12 +151,39 @@ python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
 対生成のイベントで、HA のヒットが 2 つ（`--n-hits`）のものを選び、2 点を結んだ線をビームに垂直な面に射影した方位角 φ（0〜180°）の分布を `A [1 + μ cos 2(φ − φ0)]` で fit する。
 `.h5` を作らずに raw（`ha<NN>_<番号>.dat`）を直接読み、ボード同士はトリガーカウンタでそろえる。1 つのランのボードは 2 つの storage に分かれるので、`-i` に両方を渡す。
 
+実行のしかた（WSL で。`/usr/bin/python3` を使う。numba、h5py、matplotlib が入っている方）:
+
 ```bash
-python3 PSA_analysis/src_onoda/pair_polarization.py \
-  -i /mnt/nas_eureka/SMILE-3FM_data/<日付>/calltt/<日付>_runNN /mnt/nas_eureka/SMILE-3FM_data/<日付>/killua/<日付>_runNN \
-  --beam-dir 0 0 1 --ref-axis 1 0 0 -o pair_runNN
-# 偏光なし（または偏光の向きを回した）ランと比べる: --reference <そのランの calltt と killua>
+cd ~/analysis_sm3_FM
+mkdir -p PSA_analysis/pair_output    # 出力の置き場（git には入れない）
+
+# 1. まず数ファイルだけで試す（ボードごとに 2 ファイル。ヒットの数と peak_id の窓が出る）
+NAS=/mnt/nas_eureka/SMILE-3FM_data
+/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
+  -i $NAS/20261201/calltt/20261201_run05 $NAS/20261201/killua/20261201_run05 \
+  --beam-dir 0 0 1 --ref-axis 1 0 0 --max-files 2 \
+  -o PSA_analysis/pair_output/run05_test
+
+# 2. ラン全体
+/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
+  -i $NAS/20261201/calltt/20261201_run05 $NAS/20261201/killua/20261201_run05 \
+  --beam-dir 0 0 1 --ref-axis 1 0 0 \
+  -o PSA_analysis/pair_output/run05
+
+# 3. 偏光の向きを 90° 回したラン（または偏光なしのラン）run06 と比べる
+/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
+  -i $NAS/20261201/calltt/20261201_run05 $NAS/20261201/killua/20261201_run05 \
+  --reference $NAS/20261201/calltt/20261201_run06 $NAS/20261201/killua/20261201_run06 \
+  --beam-dir 0 0 1 --ref-axis 1 0 0 \
+  -o PSA_analysis/pair_output/run05_vs_run06
 ```
+
+- 日付・ラン番号（`20261201`、`run05`、`run06`）は例。実際のランに置き換える。
+- `--beam-dir` はビームの向き（検出器の座標。上から下へなら `0 0 1`、東から西へなら `-1 0 0`）。試験の配置に合わせる。
+- 出力は `<-o の名前>.png`（φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<-o の名前>_pairs.csv`、`<-o の名前>.json`。
+- 偏光の向きを 90° 回したランを reference にしたときは、比の変調は偏光の効果の 2 倍になる（μ は 2 で割って読む）。偏光なしのランならそのまま。
+- 手元のテストラン（HA 1 枚、ペアは無い）で動くかだけ確かめるとき:
+  `/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py -i PSA_analysis/data/cal_psa/run_kyoto/20261029_run06 -o PSA_analysis/pair_output/test`
 
 - ヒットの位置はブロック（8×8 の結晶）の中心で、`PSA_analysis/param/geometry_sm3.csv`（EricaNext の `calib/psa/geometry.csv` の写し）から取る。e± は HG が飽和しやすく、飽和すると重心がブロックの中央に寄るので、ピクセルまでは求めない。
 - ch は ADC 番号（1, 2, 4, 8, 16, 32 → 0〜5、EricaNext と同じ）。`psa_decode.py` の `.h5` の ch（5 − ch）とは逆なので注意。
