@@ -148,49 +148,43 @@ python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
 
 ### 偏光ビーム試験の簡易解析（`pair_polarization.py`）
 
-対生成のイベントで、HA のヒットが 2 つ（`--n-hits`）のものを選び、2 点を結んだ線をビームに垂直な面に射影した方位角 φ（0〜180°）の分布を `A [1 + μ cos 2(φ − φ0)]` で fit する。
-`.h5` を作らずに raw（`ha<NN>_<番号>.dat`）を直接読み、ボード同士はトリガーカウンタでそろえる。1 つのランのボードは 2 つの storage に分かれるので、`-i` に両方を渡す。
+対生成のイベントで、HA のヒットが 2 つ（`n_hits`）のものを選び、2 点を結んだ線をビームに垂直な面に射影した方位角 φ（0〜180°）の分布を `A [1 + μ cos 2(φ − φ0)]` で fit する。
+`.h5` を作らずに raw（`ha<NN>_<番号>.dat`）を直接読む。1 つのランのボードは 2 つの storage（calltt、killua）に分かれるので両方読み、ラン 1 つの中でボード同士をトリガーカウンタ（`trig`）でそろえる（ボードの中で `trig` が戻ったら epoch を 1 つ進め、(epoch, `trig`) で組にする。EricaNext の `PSA_ReadData` と同じ）。
+複数のランは、ランごとに組にしてから方位角を足す（ランをまたいで `trig` を混ぜない）。
+
+**入力と条件は `PSA_analysis/param/pair_polarization.json` に書く**（既定でこれを読む）。ラン（`runs`）、比べるラン（`reference_runs`）、ビームの向き、カットなど。各キーの説明はファイルの `_doc`。
+ランは `"20261201_run05"` と書けば、`<nas>/20261201/{calltt,killua}/20261201_run05` を読む（`{"date": ..., "run": ...}` や、ディレクトリを直接 `{"name": ..., "dirs": [...]}` でもよい）。今はテスト用に手元の ha03 のラン（ペアは無い）が入っている。
+コマンドラインで渡したものは JSON より優先する。`--runs` や `-i` を渡すと、JSON の `runs` と `reference_runs` は使わない。
 
 実行のしかた（WSL で。`/usr/bin/python3` を使う。numba、h5py、matplotlib が入っている方）:
 
 ```bash
 cd ~/analysis_sm3_FM
-mkdir -p PSA_analysis/pair_output    # 出力の置き場（git には入れない）
 
-# 1. まず数ファイルだけで試す（ボードごとに 2 ファイル。ヒットの数と peak_id の窓が出る）
-NAS=/mnt/nas_eureka/SMILE-3FM_data
-/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
-  -i $NAS/20261201/calltt/20261201_run05 $NAS/20261201/killua/20261201_run05 \
-  --beam-dir 0 0 1 --ref-axis 1 0 0 --max-files 2 \
-  -o PSA_analysis/pair_output/run05_test
+# 1. param/pair_polarization.json のとおりに流す（出力は既定で PSA_analysis/pair_output/pair_polarization.*）
+/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py
 
-# 2. ラン全体
-/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
-  -i $NAS/20261201/calltt/20261201_run05 $NAS/20261201/killua/20261201_run05 \
-  --beam-dir 0 0 1 --ref-axis 1 0 0 \
-  -o PSA_analysis/pair_output/run05
+# 2. 別の設定ファイル（ビーム試験用に写して書き換えたものなど）
+cp PSA_analysis/param/pair_polarization.json PSA_analysis/param/pair_beamtest.json   # runs などを書き換える
+/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py --config PSA_analysis/param/pair_beamtest.json
 
-# 3. 偏光の向きを 90° 回したラン（または偏光なしのラン）run06 と比べる
+# 3. ランをコマンドラインで（複数なら足す）。まず --max-files 2 で数ファイルだけ試すとよい
 /usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
-  -i $NAS/20261201/calltt/20261201_run05 $NAS/20261201/killua/20261201_run05 \
-  --reference $NAS/20261201/calltt/20261201_run06 $NAS/20261201/killua/20261201_run06 \
-  --beam-dir 0 0 1 --ref-axis 1 0 0 \
-  -o PSA_analysis/pair_output/run05_vs_run06
+  --runs 20261201_run05 20261201_run07 --reference-runs 20261201_run06 \
+  --beam-dir 0 0 1 --max-files 2 -o PSA_analysis/pair_output/run05_07_vs_06_test
+
+# 4. ディレクトリを直接（1 ラン。NAS 以外の場所にあるとき）
+/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
+  -i /path/to/calltt/20261201_run05 /path/to/killua/20261201_run05 -o PSA_analysis/pair_output/run05
 ```
 
-- 日付・ラン番号（`20261201`、`run05`、`run06`）は例。実際のランに置き換える。
-- `--beam-dir` はビームの向き（検出器の座標。上から下へなら `0 0 1`、東から西へなら `-1 0 0`）。試験の配置に合わせる。
-- 出力は `<-o の名前>.png`（φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<-o の名前>_pairs.csv`、`<-o の名前>.json`。
-- 偏光の向きを 90° 回したランを reference にしたときは、比の変調は偏光の効果の 2 倍になる（μ は 2 で割って読む）。偏光なしのランならそのまま。
-- 手元のテストラン（HA 1 枚、ペアは無い）で動くかだけ確かめるとき:
-  `/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py -i PSA_analysis/data/cal_psa/run_kyoto/20261029_run06 -o PSA_analysis/pair_output/test`
-
+- 日付・ラン番号（`20261201`、`run05` など）は例。実際のランに置き換える。
 - ヒットの位置はブロック（8×8 の結晶）の中心で、`PSA_analysis/param/geometry_sm3.csv`（EricaNext の `calib/psa/geometry.csv` の写し）から取る。e± は HG が飽和しやすく、飽和すると重心がブロックの中央に寄るので、ピクセルまでは求めない。
 - ch は ADC 番号（1, 2, 4, 8, 16, 32 → 0〜5、EricaNext と同じ）。`psa_decode.py` の `.h5` の ch（5 − ch）とは逆なので注意。
-- 座標は検出器の座標（X: 東、Y: 南、Z: 下）。`--beam-dir` はビームの向き、`--ref-axis` は φ = 0 の軸（ビームに垂直な面に射影して使う）。
-- ヒットは HG ≥ `--hg-min`（既定 1000 ADC）で、peak_id がボードごとの最頻値 ± `--peak-id-window`（既定 3）のもの。
-- 検出器の形（HA の並び）だけでも φ の分布は平らにならないので、偏光の大きさは `--reference` のランとの比（`N / N_ref`）の fit で見る。
-- 出力: `<out>.png`（φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<out>_pairs.csv`（ペアの一覧）、`<out>.json`（fit の結果と条件）。
+- 座標は検出器の座標（X: 東、Y: 南、Z: 下）。`beam_dir` はビームの向き（上から下へなら `[0, 0, 1]`、東から西へなら `[-1, 0, 0]`）、`ref_axis` は φ = 0 の軸（ビームに垂直な面に射影して使う）。試験の配置に合わせる。
+- ヒットは HG ≥ `hg_min`（既定 1000 ADC）で、peak_id がボードごとの最頻値 ± `peak_id_window`（既定 3）のもの。
+- 検出器の形（HA の並び）だけでも φ の分布は平らにならないので、偏光の大きさは比べるランとの比（`N / N_ref`）の fit で見る。偏光の向きを 90° 回したランと比べたときは、比の μ は偏光の効果の 2 倍（2 で割って読む）。偏光なしのランならそのまま。
+- 出力: `<out>.png`（全ランを足した φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<out>_pairs.csv`（ラン、epoch、trig ごとのペアの一覧）、`<out>.json`（全体とランごとの fit、条件、ボードごとのフレーム数と trig の戻った回数）。
 
 既定の入力・出力先は、どれもこのリポジトリの中からの相対で決まる。画面に図を出さずに保存だけするときは
 `MPLBACKEND=Agg` を付ける（XLaunch が無いと peak_search などが止まる）。

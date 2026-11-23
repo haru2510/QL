@@ -49,6 +49,7 @@
 !/PSA_analysis/param/psa_param.csv
 !/PSA_analysis/param/run_file.json
 !/PSA_analysis/param/geometry_sm3.csv
+!/PSA_analysis/param/pair_polarization.json
 
 # 最初にもらった元のコード (src_onoda はここから直したもの。比べるために残す)
 !/PSA_analysis/original/

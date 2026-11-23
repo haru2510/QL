@@ -1,0 +1,41 @@
+{
+  "_doc": {
+    "_": "src_onoda/pair_polarization.py の既定の入力と条件。コマンドラインで渡したものはそちらが優先する(-i / --runs を渡すと runs と reference_runs は使わない)。相対パスはリポジトリ(analysis_sm3_FM)から",
+    "runs": "解析するラン。複数なら、ランごとに trig で組にしてから方位角を足す。書き方は 3 通り: \"20261201_run05\"(NAS の <nas>/<日付>/<storages>/<日付>_runNN を読む)、{\"date\": \"20261201\", \"run\": \"run05\"}、{\"name\": \"<名前>\", \"dirs\": [\"<calltt のラン>\", \"<killua のラン>\"]}(ディレクトリを直接)。今はテスト用に手元の ha03 のラン(ペアは無い)。ビーム試験では例えば [\"20261201_run05\", \"20261201_run07\"]",
+    "reference_runs": "比べるラン(偏光なし、または偏光の向きを 90° 回したもの)。runs と同じ書き方。空なら比の fit はしない。90° 回したランと比べたときは、比の mu は偏光の効果の 2 倍",
+    "nas": "\"<日付>_runNN\" の形のランを探す NAS のディレクトリ",
+    "storages": "1 つのランのボードが分かれている storage(両方読む)",
+    "out": "出力の名前(<out>.png、<out>_pairs.csv、<out>.json)。ディレクトリが無ければ作る",
+    "geometry": "ブロックの位置(EricaNext の calib/psa/geometry.csv の写し、ch = ADC 番号)",
+    "beam_dir": "ビームの向き(検出器の座標。X: 東、Y: 南、Z: 下)。上から下へなら [0, 0, 1]、東から西へなら [-1, 0, 0]",
+    "ref_axis": "方位角 phi = 0 の軸(ビームに垂直な面に射影して使う)",
+    "hg_min": "ヒットとして数える HG の下限 [ADC]",
+    "peak_id_window": "トリガー時刻のヒットだけ使う: ボードごとの peak_id の最頻値 ± この値。負なら使わない",
+    "n_hits": "選ぶイベントのヒットの数(対生成なら 2)",
+    "min_distance": "2 点の距離の下限 [mm]",
+    "bins": "方位角のビンの数(0-180°)",
+    "max_files": "ボードごとに読むファイルの数の上限(0 = 全部。試しに速く流すとき)",
+    "include_tmp": "true: 書きかけの .dat.tmp も読む"
+  },
+  "_units": {
+    "hg_min": "ADC",
+    "min_distance": "mm"
+  },
+  "runs": [
+    {"name": "test_20261029_run06", "dirs": ["PSA_analysis/data/cal_psa/run_kyoto/20261029_run06"]}
+  ],
+  "reference_runs": [],
+  "nas": "/mnt/nas_eureka/SMILE-3FM_data",
+  "storages": ["calltt", "killua"],
+  "out": "PSA_analysis/pair_output/pair_polarization",
+  "geometry": "PSA_analysis/param/geometry_sm3.csv",
+  "beam_dir": [0.0, 0.0, 1.0],
+  "ref_axis": [1.0, 0.0, 0.0],
+  "hg_min": 1000.0,
+  "peak_id_window": 3,
+  "n_hits": 2,
+  "min_distance": 0.0,
+  "bins": 18,
+  "max_files": 0,
+  "include_tmp": false
+}
