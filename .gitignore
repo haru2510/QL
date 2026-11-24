@@ -14,6 +14,10 @@
 !/TPC_analysis/ql_feed.py
 !/TPC_analysis/ql_stream.py
 !/TPC_analysis/ql_trace.py
+!/TPC_analysis/beam_vertex.py
+!/TPC_analysis/param/
+/TPC_analysis/param/*
+!/TPC_analysis/param/beam_vertex.json
 
 !/PSA_analysis/
 /PSA_analysis/*

@@ -1,0 +1,44 @@
+{
+  "_doc": {
+    "_": "TPC_analysis/beam_vertex.py の既定の入力と条件。コマンドラインで渡したものはそちらが優先する(-i / --runs を渡すと runs は使わない)。相対パスはリポジトリ(analysis_sm3_FM)から",
+    "runs": "解析するラン。複数なら、ランごとに頂点を出してから足す。書き方は 3 通り: \"20261123_run03\"(<nas>/<日付>/<storages>/<日付>_runNN を読む)、{\"date\": \"20261123\", \"run\": \"run03\"}、{\"name\": \"<名前>\", \"dirs\": [\"<calltt のラン>\", \"<killua のラン>\"]}。今はこの PC にある 6 月の TPC_cal のテストラン。ビーム試験では例えば [\"20261123_run03\", \"20261123_run04\"]",
+    "nas": "\"<日付>_runNN\" の形のランを探す NAS のディレクトリ",
+    "storages": "1 つのランのボードが分かれている storage(calltt: アノード、killua: カソード。両方読む)",
+    "out": "出力の名前(<out>.png、<out>_vertices.csv、<out>.json)。ディレクトリが無ければ作る",
+    "pitch_strip": "ストリップの間隔 [mm]",
+    "clock_offset": "GEM 面で電離した電子が届くクロック [clock](EricaNext の calib/tpc/drift_velocity.dat、20261115 run03。天板の端がなだらかで確認には通っていない)",
+    "velocity": "ドリフト速度 [mm/clock](同上)",
+    "z_gem": "GEM 面の z [mm](GEM 1 枚の構成で 5 mm)",
+    "margin": "fiducial の余白 [mm]: 頂点が壁(±153.6 mm)とドリフト領域の両端(z_gem、317 mm)から margin だけ内側",
+    "min_hits": "事象のヒットの数(鳴りっぱなしのストリップを除く、全ボードの和)の下限",
+    "hot_fraction": "ボードの最初のファイルで、フレームのこの割合以上で鳴るストリップは使わない",
+    "fit_cut_sigma": "ビームの軸の fit で、軸からの距離がこの値 × RMS を超える頂点を外して fit し直す",
+    "fit_iterations": "ビームの軸の fit をし直す回数の上限",
+    "max_files": "ボードごとに読むファイルの数の上限(0 = 全部。試しに速く流すとき)",
+    "keep_clocks": "フレームごとに残す早いクロックの数(頂点には一番早いところしか要らない。メモリを抑える)"
+  },
+  "_units": {
+    "pitch_strip": "mm",
+    "clock_offset": "clock",
+    "velocity": "mm/clock",
+    "z_gem": "mm",
+    "margin": "mm"
+  },
+  "runs": [
+    {"name": "test_20260623_TPC_cal", "dirs": ["/home/onoda/ANLNext/Erica_git_dev/EricaNext/test.data/run_20260623T072649Z"]}
+  ],
+  "nas": "/mnt/nas_eureka/SMILE-3FM_data",
+  "storages": ["calltt", "killua"],
+  "out": "TPC_analysis/beam_output/beam_vertex",
+  "pitch_strip": 0.4,
+  "clock_offset": 133.69,
+  "velocity": 0.39358,
+  "z_gem": 5.0,
+  "margin": 10.0,
+  "min_hits": 10,
+  "hot_fraction": 0.05,
+  "fit_cut_sigma": 3.0,
+  "fit_iterations": 5,
+  "max_files": 0,
+  "keep_clocks": 16
+}

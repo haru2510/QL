@@ -61,6 +61,7 @@ Scaler は全期間を同期する。取得元は `QL_SCALER_NODE` と `QL_SCALE
 | `ql_sync.sh` | Storage Node の全データを QL 用 PC へ同期する |
 | `TPC_analysis/ql_follow.py` | 同期したファイルから間引いたイベントを流す（同期済みのデータで QL を出し直すとき） |
 | `TPC_analysis/ql_replay.py` | 保存済みの run を流す試験用の送信器 |
+| `TPC_analysis/beam_vertex.py` | ビーム試験: TPC の散乱点（対生成の頂点）の 3 次元の分布とビームの軸（「解析のコード」を参照。QL では使わない） |
 
 残りは QL が使う解析の関数。
 
@@ -185,6 +186,33 @@ cp PSA_analysis/param/pair_polarization.json PSA_analysis/param/pair_beamtest.js
 - ヒットは HG ≥ `hg_min`（既定 1000 ADC）で、peak_id がボードごとの最頻値 ± `peak_id_window`（既定 3）のもの。
 - 検出器の形（HA の並び）だけでも φ の分布は平らにならないので、偏光の大きさは比べるランとの比（`N / N_ref`）の fit で見る。偏光の向きを 90° 回したランと比べたときは、比の μ は偏光の効果の 2 倍（2 で割って読む）。偏光なしのランならそのまま。
 - 出力: `<out>.png`（全ランを足した φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<out>_pairs.csv`（ラン、epoch、trig ごとのペアの一覧）、`<out>.json`（全体とランごとの fit、条件、ボードごとのフレーム数と trig の戻った回数）。
+
+### ビーム試験: TPC の散乱点の 3 次元の分布からビームの道を出す（`TPC_analysis/beam_vertex.py`）
+
+γ線ビームが TPC のガスの中で相互作用した点（対生成の頂点）を事象ごとに出し、その 3 次元の分布と、頂点に fit した直線（ビームの軸）を描く。
+TPC の raw（`tpc_enc_a*`、`tpc_enc_c*`）を直接読む（読み方は `check_tpc.py` と同じ）。ランの書き方と JSON の扱いは `pair_polarization.py` と同じで、既定で `TPC_analysis/param/beam_vertex.json` を読む。
+
+- **頂点**: 同じ uPIC のアノードとカソードの両方にヒットがある一番早いクロック（z が一番小さい点）。x、y はそのクロックのストリップの位置の平均。対生成の e± は頂点から前に飛ぶので、ビームが上から下（+Z）なら一番上流の点になる。ToT 補正と 3 次元の組み合わせ（偽の点が出る）はしない。
+  EricaNext の `TOT_Skewness` の散乱点（歪度で飛跡の端を選ぶ）は電子 1 本の前提なので、対生成には使わない。
+- **z** = `velocity` × (クロック − `clock_offset`) + `z_gem`（EricaNext と同じ。既定値は EricaNext の `calib/tpc/drift_velocity.dat`）。**z の絶対値は、シンチ（HA）などの外のトリガーで時刻の原点が決まっているランでしか意味が無い**。TPC 自身のトリガーのラン（TPC_cal など）では、一番早いヒットがいつもトリガーの時刻に来るので、頂点が z の端に張り付く。
+- **fiducial**: 頂点が壁（±153.6 mm）とドリフト領域の両端（`z_gem`、317 mm）から `margin`（既定 10 mm）だけ内側。外（容器、天板、HA）で対生成して入ってきた e± の事象を落とす。
+- **ノイズ**: ボードの最初のファイルでフレームの `hot_fraction`（既定 5 %）以上で鳴るストリップは使わない。ヒットが `min_hits`（既定 10）より少ない事象は使わない。
+- **ビームの軸**: fiducial を通った頂点に 3 次元の直線を fit する（主成分。軸からの距離が `fit_cut_sigma` × RMS を超える頂点を外して fit し直す）。Z からの角度、方位角、軸からの距離の分布（R50、R68、R90）を出す。
+- メモリを抑えるため、フレームごとにクロックでまとめ（ヒットの数と位置の和）、早いクロックから `keep_clocks`（既定 16）個だけ持つ。
+
+```bash
+cd ~/analysis_sm3_FM
+# JSON のとおり（今はこの PC の 6 月の TPC_cal のテストラン）
+/usr/bin/python3 TPC_analysis/beam_vertex.py
+# ビーム試験のラン（まず --max-files 2 で試す。複数なら足す）
+/usr/bin/python3 TPC_analysis/beam_vertex.py --runs 20261123_run03 20261123_run04 --max-files 2 \
+  -o TPC_analysis/beam_output/run03_04_test
+# ディレクトリを直接
+/usr/bin/python3 TPC_analysis/beam_vertex.py -i /path/to/calltt/20261123_run03 /path/to/killua/20261123_run03 \
+  -o TPC_analysis/beam_output/run03
+```
+
+出力: `<out>.png`（全頂点と fiducial の頂点の X–Y、X–Z、Y–Z の分布、fiducial の箱、fit した軸）、`<out>_vertices.csv`（事象ごとの頂点、fiducial かどうか、軸からの距離）、`<out>.json`（軸の fit、条件、ボードごとのフレーム数）。
 
 既定の入力・出力先は、どれもこのリポジトリの中からの相対で決まる。画面に図を出さずに保存だけするときは
 `MPLBACKEND=Agg` を付ける（XLaunch が無いと peak_search などが止まる）。
