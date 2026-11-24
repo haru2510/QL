@@ -505,11 +505,11 @@ def main():
             m = s["margin"]
             box = {0: (-HALF_XY + m, HALF_XY - m), 1: (-HALF_XY + m, HALF_XY - m), 2: (s["z_gem"] + m, Z_TOP - m)}
             ax.add_patch(plt.Rectangle((box[i][0], box[j][0]), box[i][1] - box[i][0], box[j][1] - box[j][0],
-                                       fill=False, ec="w", ls="--", lw=1))
+                                       fill=False, ec="k", ls="--", lw=1.2))
             if line and row == 1:
                 c, d = np.array(line["point_mm"]), np.array(line["direction"])
                 t = np.linspace(-500, 500, 3)
-                ax.plot(c[i] + t * d[i], c[j] + t * d[j], "w-", lw=1.5)
+                ax.plot(c[i] + t * d[i], c[j] + t * d[j], "m-", lw=1.5)
             ax.set(xlim=xr, ylim=yr, xlabel=lab[0], ylabel=lab[1], title=tag)
             if j == 1 or j == 2:
                 ax.invert_yaxis()
@@ -522,7 +522,7 @@ def main():
         txt = "beam line: not fitted (fewer than 3 fiducial vertices)"
     names = ", ".join(r["name"] for r in runs)
     fig.suptitle(f"{os.path.basename(out)}: {names}\nvertex = earliest clock with anode and cathode hits in the same uPIC; "
-                 f"fiducial margin {s['margin']:g} mm (dashed); v {s['velocity']} mm/clock, offset {s['clock_offset']}, z_gem {s['z_gem']}\n{txt}",
+                 f"fiducial margin {s['margin']:g} mm (black dashed box); beam line: magenta; v {s['velocity']} mm/clock, offset {s['clock_offset']}, z_gem {s['z_gem']}\n{txt}",
                  fontsize=10)
     fig.tight_layout(rect=(0, 0, 1, .93))
     fig.savefig(f"{out}.png", dpi=100)

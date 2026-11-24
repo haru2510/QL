@@ -212,7 +212,7 @@ cd ~/analysis_sm3_FM
   -o TPC_analysis/beam_output/run03
 ```
 
-出力: `<out>.png`（全頂点と fiducial の頂点の X–Y、X–Z、Y–Z の分布、fiducial の箱、fit した軸）、`<out>_vertices.csv`（事象ごとの頂点、fiducial かどうか、軸からの距離）、`<out>.json`（軸の fit、条件、ボードごとのフレーム数）。
+出力: `<out>.png`（全頂点と fiducial の頂点の X–Y、X–Z、Y–Z の分布、fiducial の箱（黒の破線）、fit した軸（マゼンタ））、`<out>_vertices.csv`（事象ごとの頂点、fiducial かどうか、軸からの距離）、`<out>.json`（軸の fit、条件、ボードごとのフレーム数）。
 
 既定の入力・出力先は、どれもこのリポジトリの中からの相対で決まる。画面に図を出さずに保存だけするときは
 `MPLBACKEND=Agg` を付ける（XLaunch が無いと peak_search などが止まる）。
