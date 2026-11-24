@@ -21,8 +21,10 @@
       "track_figure": "カット前後の飛跡積算PNG。",
       "beam_axis_prefix": "fitの保存名。拡張子を付けずに指定し、.json・.png・_local.pngを作る。",
       "event_figure_prefix": "保存済みイベント点群から作るPNG・HTMLの保存名（拡張子なし）。",
-      "scintillator_figure": "保存済み全rawシンチ件数から作るブロック別分布PNG。"
-    }
+      "scintillator_figure": "保存済み全rawシンチ件数から作るブロック別分布PNG。",
+      "lg_event_dir": "LG重心とHG位置較正で更新した候補JSONと集計の保存先。"
+    },
+    "lg_position": "reconstruct_ha_lg.py: LG波形の重心をHG用position_haNN.csvに入力してピクセル位置を暫定推定。LGも飽和・LG積分<=0・8x8範囲外はブロック中心へ代用。エネルギー較正には流用しない。"
   },
   "_units": {
     "pitch_strip": "mm",
@@ -49,7 +51,13 @@
   "inputs": {
     "vertices_all": "ETCC_cal/output/20261124_run06_07/vertices/all.csv",
     "event_points": "ETCC_cal/output/20261124_run06_07/events/run06_trig22204.json",
-    "scintillator_counts": "ETCC_cal/output/20261124_run06_07/scintillator/all_raw_blocks.json"
+    "scintillator_counts": "ETCC_cal/output/20261124_run06_07/scintillator/all_raw_blocks.json",
+    "event_candidates": [
+      "ETCC_cal/output/20261124_run06_07/events/run06_trig22204.json",
+      "ETCC_cal/output/20261124_run06_07/events/run06_trig55668.json"
+    ],
+    "ha_position_calibration_dir": "/home/onoda/ANLNext/Erica_git_dev/EricaNext/calib/psa",
+    "scintillator_geometry": "PSA_analysis/param/geometry_sm3.csv"
   },
   "outputs": {
     "veto_dir": "ETCC_cal/output/20261124_run06_07/selection",
@@ -61,6 +69,7 @@
     "track_figure": "ETCC_cal/output/20261124_run06_07/tracks/track_sum.png",
     "beam_axis_prefix": "ETCC_cal/output/20261124_run06_07/beam_axis/axis_z0veto",
     "event_figure_prefix": "ETCC_cal/output/20261124_run06_07/events/run06_trig22204",
-    "scintillator_figure": "ETCC_cal/output/20261124_run06_07/scintillator/all_raw_blocks.png"
+    "scintillator_figure": "ETCC_cal/output/20261124_run06_07/scintillator/all_raw_blocks.png",
+    "lg_event_dir": "ETCC_cal/output/20261124_run06_07/events/lg"
   }
 }

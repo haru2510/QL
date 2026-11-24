@@ -246,6 +246,37 @@ chは現行EricaNextのADC番号順（ADC 1,2,4,8,16,32 → ch0〜5）。旧HDF5
 run06・trigger 22204では二股の形が見え、ha01とha15の現行ch4（どちらも出力ch1）が同じトリガーでヒットしている。ただし対生成の確定ではない。
 保存したtrigger 22204・55668はZ側イベント除外にも抵触しないことを確認した。
 
+## LG重心によるシンチのピクセル位置（HG位置較正を暫定流用）
+
+`reconstruct_ha_lg.py` は保存済み候補と同じトリガーのHA rawを読み、LG4信号のペデスタル差し引き後の積分から重心を求める。
+
+```text
+x_lg = (J0 − J1 − J2 + J3) / (J0 + J1 + J2 + J3)
+y_lg = (−J0 − J1 + J2 + J3) / (J0 + J1 + J2 + J3)
+```
+
+LG用の位置較正は作っていないため、ユーザー指定によりHG用 `position_haNN.csv` の64ピークと(n,m)対応を流用する。
+EricaNextと同じthin-plate spline（smoothing=0）をLG重心に適用し、`floor(corrected + 0.5)` で1〜8のピクセルを選ぶ。
+位置は `geometry_sm3.csv` の向き・ピッチで検出器座標へ変換する。HG/LGの重心・積分・飽和フラグ、使用較正ファイルのハッシュ、元のブロック中心もJSONへ保存する。
+LGも飽和、LG積分が非正、または補正後が8×8範囲外なら、ピクセル位置を採用せずブロック中心へ戻し、図とJSONに明記する。
+HG用較正のLGへの流用は暫定であり、HGとLGの位置応答が同じであることを検証したわけではない。エネルギーのkeV較正をLGへ流用する処理は行っていない。
+
+既存2候補の4ヒットはHG・LGとも飽和フラグなし。LG位置は全て8×8内だった。
+
+- [trigger 22204・LG位置版PNG](output/20261124_run06_07/events/lg/run06_trig22204_lg.png) / [回転できるHTML](output/20261124_run06_07/events/lg/run06_trig22204_lg.html)
+- [trigger 55668・LG位置版PNG](output/20261124_run06_07/events/lg/run06_trig55668_lg.png) / [回転できるHTML](output/20261124_run06_07/events/lg/run06_trig55668_lg.html)
+- [位置・飽和フラグの一覧](output/20261124_run06_07/events/lg/lg_position_summary.json)
+
+入力・出力は同じ `config/20261124_run06_07.json` に指定する。
+`inputs.event_candidates`、`inputs.ha_position_calibration_dir`、`inputs.scintillator_geometry`、`outputs.lg_event_dir` を使う。
+
+```bash
+/usr/bin/python3 ETCC_cal/reconstruct_ha_lg.py --config ETCC_cal/config/20261124_run06_07.json
+/usr/bin/python3 ETCC_cal/plot_saved_event.py \
+  --input ETCC_cal/output/20261124_run06_07/events/lg/run06_trig22204_lg.json \
+  --out ETCC_cal/output/20261124_run06_07/events/lg/run06_trig22204_lg
+```
+
 ## 再実行
 
 以下はリポジトリ直下で実行する。新たな依存インストールは不要。

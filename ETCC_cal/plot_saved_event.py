@@ -47,13 +47,14 @@ def main():  # 保存済み候補の再描画を行う。
         ax.set(xlabel=axis.upper() + " [mm]", ylabel="Z [mm] (down)", xlim=(-210, 210), ylim=(365, 0), title=axis.upper() + "Z raw projection")  # 投影の方向と単位を示す。
         ax.grid(alpha=0.2)  # 位置関係を見やすくする。
     title = f"{event['run']} / trigger {event['trig']}: two-track topology candidate"  # 対生成の確定ではなく形状候補と明示する。
-    fig.suptitle(title + "\nSame-trigger TPC + HA; 3D includes X/Y ambiguities; HA positions are block centres")  # 3D対応の限界を図に残す。
+    position_note = event.get("ha_position_method", "HA positions are block centres")  # LG位置推定版と元のブロック中心版を区別する。
+    fig.suptitle(title + "\nSame-trigger TPC + HA; 3D includes X/Y ambiguities\n" + position_note)  # 3D対応の限界を図に残す。
     fig.tight_layout()  # 軸ラベルの重なりを抑える。
     fig.savefig(prefix.with_suffix(".png"), dpi=140)  # 固定視点のPNGを保存する。
     plt.close(fig)  # 描画メモリを解放する。
     interactive = go.Figure()  # 回転可能な3D図を用意する。
     interactive.add_trace(go.Scatter3d(x=points[:, 0], y=points[:, 1], z=points[:, 2], mode="markers", name="TPC combinations (ambiguous)", marker=dict(size=2, color=points[:, 2], colorscale="Viridis", opacity=0.4)))  # 曖昧な点を確定した2本の線にはしない。
-    interactive.add_trace(go.Scatter3d(x=hits[:, 0], y=hits[:, 1], z=hits[:, 2], mode="markers+text", text=labels, name="HA block centres", marker=dict(size=8, color=colors, symbol="square")))  # シンチの番号をホバーと文字で確認できるようにする。
+    interactive.add_trace(go.Scatter3d(x=hits[:, 0], y=hits[:, 1], z=hits[:, 2], mode="markers+text", text=labels, name=event.get("ha_position_method", "HA block centres"), marker=dict(size=8, color=colors, symbol="square")))  # シンチの番号をホバーと文字で確認できるようにする。
     interactive.update_layout(title=title, scene=dict(xaxis_title="X [mm]", yaxis_title="Y [mm]", zaxis_title="Z [mm]", zaxis=dict(autorange="reversed"), aspectmode="data"))  # 3軸の単位と正負の向きをそろえる。
     interactive.write_html(prefix.with_suffix(".html"), include_plotlyjs=True)  # ネット接続なしで開けるHTMLとして保存する。
     print(f"Saved {prefix}.png and .html")  # 保存先を報告する。
