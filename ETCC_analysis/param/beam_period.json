@@ -1,0 +1,64 @@
+{
+  "_doc": {
+    "_": "ETCC_analysis/beam_period.py の既定の入力と条件。コマンドラインで渡したものはそちらが優先する(-i / --runs を渡すと runs は使わない)。相対パスはリポジトリ(analysis_sm3_FM)から",
+    "runs": "解析するラン。ランごとに解析する(ランをまたぐとカウンタの原点が違う)。書き方は 3 通り: \"20261123_run03\"(<nas>/<日付>/<storages>/<日付>_runNN を読む)、{\"date\": \"20261123\", \"run\": \"run03\"}、{\"name\": \"<名前>\", \"dirs\": [\"<calltt のラン>\", \"<killua のラン>\"]}。今は 20261116 run03(ETCC、線源あり。周期は無いはず)。ビーム試験ではそのランに書き換える",
+    "nas": "\"<日付>_runNN\" の形のランを探す NAS のディレクトリ",
+    "storages": "1 つのランのボードが分かれている storage(両方読む)",
+    "out": "出力の名前(<out>_<ラン>.png、<out>_<ラン>_events.csv、<out>.json)。ディレクトリが無ければ作る",
+    "sources": "読むもの: \"ha\"(ha<NN>_*.dat の clk)、\"tpc\"(tpc_enc_*.raw の N_time)。ボードごとに解析する",
+    "ha_tick": "HA の clk の 1 カウント [s](1 MHz)",
+    "tpc_tick": "TPC の N_time の 1 カウント [s](100 us。run_20260623T072649Z で測った値)",
+    "spectra": "パワースペクトルの (bin [s], segment [s]) の並び。bin はカウンタの 1 カウントより細かくはしない。速い周期(パルス)用と遅い周期(スピル)用。見える周波数は 1/segment から 1/(2 bin) まで",
+    "max_segments": "1 つのスペクトルで平均する segment の数の上限(時間を抑える)",
+    "f_min": "探す周波数の下限 [Hz]",
+    "f_max": "探す周波数の上限 [Hz]",
+    "frequency": "ビームの周波数 [Hz]。null なら探す。分かっていれば書く(そのまわりで詰める)",
+    "n_sigma": "ピークを有意とする σ の数(スペクトルでは雑音の Leahy の 2 から、畳んだ分布では Z^2_n から)",
+    "max_subharmonic": "いちばん高いピークの 1/k(k = 2..この値)にも有意なピークがあれば、基本周波数はそちら",
+    "min_period_ticks": "これより短い周期(カウンタのカウント数)は探さない。カウンタの刻みや読み出しの時間構造が偽のピークになるため(HA なら 10 us、TPC なら 1 ms より長い周期だけ見る)",
+    "n_harmonics": "周波数を詰める Z^2_n の高調波の数(パルスが細いほど多くするとよい)",
+    "phase_bins": "畳んだ位相の分布のビンの数",
+    "on_level": "on-beam の窓: 位相の分布の、底(低い 1/4 のビンの中央値)から最大値までのこの割合を超える、最大の位相を含む連続した範囲",
+    "rate_bin": "レートの時間変化の図のビン [s]",
+    "max_files": "ボードごとに読むファイルの数の上限(0 = 全部。試しに速く流すとき)"
+  },
+  "_units": {
+    "ha_tick": "s",
+    "tpc_tick": "s",
+    "f_min": "Hz",
+    "f_max": "Hz",
+    "frequency": "Hz",
+    "rate_bin": "s"
+  },
+  "runs": [
+    "20261116_run03"
+  ],
+  "nas": "/mnt/nas_eureka/SMILE-3FM_data",
+  "storages": [
+    "calltt",
+    "killua"
+  ],
+  "out": "ETCC_analysis/output/beam_period",
+  "sources": [
+    "ha",
+    "tpc"
+  ],
+  "ha_tick": 1e-06,
+  "tpc_tick": 0.0001,
+  "spectra": [
+    {"bin": 1e-06, "segment": 1.0},
+    {"bin": 0.001, "segment": 100.0}
+  ],
+  "max_segments": 300,
+  "f_min": 0.5,
+  "f_max": 100000.0,
+  "frequency": null,
+  "n_sigma": 5.0,
+  "max_subharmonic": 8,
+  "min_period_ticks": 10,
+  "n_harmonics": 4,
+  "phase_bins": 100,
+  "on_level": 0.5,
+  "rate_bin": 1.0,
+  "max_files": 0
+}

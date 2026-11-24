@@ -14,10 +14,6 @@
 !/TPC_analysis/ql_feed.py
 !/TPC_analysis/ql_stream.py
 !/TPC_analysis/ql_trace.py
-!/TPC_analysis/beam_vertex.py
-!/TPC_analysis/param/
-/TPC_analysis/param/*
-!/TPC_analysis/param/beam_vertex.json
 
 !/PSA_analysis/
 /PSA_analysis/*
@@ -40,7 +36,6 @@
 !/PSA_analysis/src_onoda/pixel_id.py
 !/PSA_analysis/src_onoda/energy_calib.py
 !/PSA_analysis/src_onoda/check_waveform.py
-!/PSA_analysis/src_onoda/pair_polarization.py
 !/PSA_analysis/src_onoda/sub_scr/base_decode.py
 !/PSA_analysis/src_onoda/sub_scr/h5_io.py
 !/PSA_analysis/src_onoda/sub_scr/read_temp.py
@@ -53,7 +48,18 @@
 !/PSA_analysis/param/psa_param.csv
 !/PSA_analysis/param/run_file.json
 !/PSA_analysis/param/geometry_sm3.csv
-!/PSA_analysis/param/pair_polarization.json
+
+# ETCC（HA と TPC の両方）のビーム試験の解析
+!/ETCC_analysis/
+/ETCC_analysis/*
+!/ETCC_analysis/pair_polarization.py
+!/ETCC_analysis/beam_vertex.py
+!/ETCC_analysis/beam_period.py
+!/ETCC_analysis/param/
+/ETCC_analysis/param/*
+!/ETCC_analysis/param/pair_polarization.json
+!/ETCC_analysis/param/beam_vertex.json
+!/ETCC_analysis/param/beam_period.json
 
 # 最初にもらった元のコード (src_onoda はここから直したもの。比べるために残す)
 !/PSA_analysis/original/

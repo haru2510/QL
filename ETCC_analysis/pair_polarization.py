@@ -3,17 +3,17 @@
 # 偏光ビーム試験の簡易解析: 対生成のイベントでシンチ（HA）のヒットが 2 つのものを選び、
 # 2 点を結んだ線の方位角（ビーム軸のまわり）の分布から偏光の向きと変調を見る。
 #
-# raw ファイル（ha<NN>_<番号>.dat）を直接読む。中身の読み取りは psa_decode.py の read_file・decode_events。
+# raw ファイル（ha<NN>_<番号>.dat）を直接読む。中身の読み取りは PSA_analysis/src_onoda/psa_decode.py の read_file・decode_events。
 # 1 つのランのボードは 2 つの storage（calltt、killua）に分かれるので、両方のディレクトリを読む。
 # ボード同士はラン 1 つの中でトリガーカウンタ（trig）でそろえる。ボードの中で trig が戻ったら epoch を 1 つ進め、
 # (epoch, trig) で組にする（EricaNext の PSA_ReadData と同じ）。複数のランは、ランごとに組にしてから方位角を足す。
 #
-# 入力と条件は、既定で param/pair_polarization.json から読む（ラン、比べるラン、ビームの向き、カットなど）。
+# 入力と条件は、既定で ETCC_analysis/param/pair_polarization.json から読む（ラン、比べるラン、ビームの向き、カットなど）。
 # コマンドラインで渡したものはそちらが優先する。-i / --runs を渡すと、JSON のラン（と比べるラン）は使わない。
 #
 # ヒットの位置はブロック（8x8 の結晶）の中心。対生成の e+ e- は HG が飽和しやすく、
 # 飽和したヒットは重心がブロックの中央に寄るので、ピクセルまでは求めない。
-# 位置は param/geometry_sm3.csv（EricaNext の calib/psa/geometry.csv の写し）。
+# 位置は PSA_analysis/param/geometry_sm3.csv（EricaNext の calib/psa/geometry.csv の写し）。
 #
 # ch の番号: ADC 番号 1, 2, 4, 8, 16, 32 → ch 0-5（EricaNext と同じ。2026-11-20 から）。
 # psa_decode.py が .h5 に書く ch は 5 - ch（古い番号）なので、ここでは .h5 を使わず raw から直接読む。
@@ -24,10 +24,10 @@
 # 比べるラン（reference）にして、比（N / N_ref）でも fit する。
 #
 # 例:
-#   python3 pair_polarization.py                                    # param/pair_polarization.json のとおり
-#   python3 pair_polarization.py --config my_beamtest.json
-#   python3 pair_polarization.py --runs 20261201_run05 20261201_run07 --reference-runs 20261201_run06
-#   python3 pair_polarization.py -i <calltt のラン> <killua のラン> -o pair_run05   # ディレクトリを直接（1 ラン）
+#   python3 ETCC_analysis/pair_polarization.py                                    # param/pair_polarization.json のとおり
+#   python3 ETCC_analysis/pair_polarization.py --config my_beamtest.json
+#   python3 ETCC_analysis/pair_polarization.py --runs 20261201_run05 20261201_run07 --reference-runs 20261201_run06
+#   python3 ETCC_analysis/pair_polarization.py -i <calltt のラン> <killua のラン> -o pair_run05   # ディレクトリを直接（1 ラン）
 #
 
 import argparse
@@ -40,15 +40,16 @@ import time
 
 import numpy as np
 
-SRC_DIR = os.path.dirname(os.path.abspath(__file__))
-if SRC_DIR not in sys.path:
-    sys.path.insert(0, SRC_DIR)
+ETCC_DIR = os.path.dirname(os.path.abspath(__file__))
+# このリポジトリ (analysis_sm3_FM) の場所。JSON の中の相対パスはここから
+REPO_DIR = os.path.dirname(ETCC_DIR)
+PSA_SRC_DIR = os.path.join(REPO_DIR, "PSA_analysis", "src_onoda")
+if PSA_SRC_DIR not in sys.path:
+    sys.path.insert(0, PSA_SRC_DIR)
 
 from psa_decode import read_file, decode_events, DEFAULT_TEMP_A, DEFAULT_TEMP_B  # noqa: E402
 
-# このリポジトリ (analysis_sm3_FM) の場所。JSON の中の相対パスはここから
-REPO_DIR = os.path.dirname(os.path.dirname(SRC_DIR))
-DEFAULT_CONFIG = os.path.join(REPO_DIR, "PSA_analysis", "param", "pair_polarization.json")
+DEFAULT_CONFIG = os.path.join(ETCC_DIR, "param", "pair_polarization.json")
 
 N_CH = 6
 FILE_RE = re.compile(r"^ha(\d+)_(\d+)\.dat$", re.IGNORECASE)
@@ -60,7 +61,7 @@ DEFAULTS = {
     "storages": ["calltt", "killua"],
     "runs": [],
     "reference_runs": [],
-    "out": "PSA_analysis/pair_output/pair_polarization",
+    "out": "ETCC_analysis/output/pair_polarization",
     "geometry": "PSA_analysis/param/geometry_sm3.csv",
     "beam_dir": [0., 0., 1.],
     "ref_axis": [1., 0., 0.],
@@ -146,7 +147,7 @@ def load_settings(args):
     elif args.reference_runs is not None:
         s["reference_runs"] = list(args.reference_runs)
     if not s["runs"]:
-        raise SystemExit("ランが無い: param/pair_polarization.json の runs、--runs か -i で渡す")
+        raise SystemExit("ランが無い: ETCC_analysis/param/pair_polarization.json の runs、--runs か -i で渡す")
 
     return s
 

@@ -61,7 +61,7 @@ Scaler は全期間を同期する。取得元は `QL_SCALER_NODE` と `QL_SCALE
 | `ql_sync.sh` | Storage Node の全データを QL 用 PC へ同期する |
 | `TPC_analysis/ql_follow.py` | 同期したファイルから間引いたイベントを流す（同期済みのデータで QL を出し直すとき） |
 | `TPC_analysis/ql_replay.py` | 保存済みの run を流す試験用の送信器 |
-| `TPC_analysis/beam_vertex.py` | ビーム試験: TPC の散乱点（対生成の頂点）の 3 次元の分布とビームの軸（「解析のコード」を参照。QL では使わない） |
+| `ETCC_analysis/` | ビーム試験の解析（偏光、TPC の頂点とビームの軸、ビームの周期）。「ETCC のビーム試験の解析」を参照。QL では使わない |
 
 残りは QL が使う解析の関数。
 
@@ -139,7 +139,6 @@ HA の解析の流れ（Storage Node の run を .h5 にしてから解析する
 | 7 | `energy_calib.py` | Cs-137 と Co-60 のピークから ADC → エネルギーの換算係数を出す |
 | - | `check_waveform.py` | `.dat` の生波形を重ねた図 |
 | - | `check_ha_order.py` | Storage Node で HA の `.dat` の trig の戻りを調べる |
-| - | `pair_polarization.py` | 偏光ビーム試験の簡易解析。raw の `.dat` を直接読み、HA のヒットが 2 つのイベントで 2 点（ブロックの中心）を結んだ線のビーム軸まわりの方位角から、偏光の変調と向きを fit する（下を参照） |
 
 ```bash
 python3 PSA_analysis/src_onoda/decode_runs.py -i "/mnt/d/UVSOR2026_late/*/20261103_run12/part*" -o PSA_analysis/h5_runs_run12
@@ -147,14 +146,26 @@ python3 PSA_analysis/src_onoda/check_data.py -i PSA_analysis/h5_runs_run12/ha02 
 python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
 ```
 
+## ETCC のビーム試験の解析（`ETCC_analysis/`）
+
+HA と TPC の両方を使うビーム試験の解析は `ETCC_analysis/` に置く。入力と条件の JSON は `ETCC_analysis/param/`、出力は既定で `ETCC_analysis/output/`。
+どれも raw を直接読み、ランは `"20261201_run05"` と書けば `<nas>/20261201/{calltt,killua}/20261201_run05` を読む（`{"date": ..., "run": ...}` や、ディレクトリを直接 `{"name": ..., "dirs": [...]}` でもよい）。
+コマンドラインで渡したものは JSON より優先する。
+
+| スクリプト | JSON | すること |
+| --- | --- | --- |
+| `pair_polarization.py` | `pair_polarization.json` | HA のヒットが 2 つのイベントで、2 点を結んだ線のビーム軸まわりの方位角から偏光の変調と向きを fit する |
+| `beam_vertex.py` | `beam_vertex.json` | TPC の散乱点（対生成の頂点）の 3 次元の分布と、ビームの軸 |
+| `beam_period.py` | `beam_period.json` | イベントの時刻の周期から、ビームのパルスの周期と位相（on-beam の窓）を出す |
+
 ### 偏光ビーム試験の簡易解析（`pair_polarization.py`）
 
 対生成のイベントで、HA のヒットが 2 つ（`n_hits`）のものを選び、2 点を結んだ線をビームに垂直な面に射影した方位角 φ（0〜180°）の分布を `A [1 + μ cos 2(φ − φ0)]` で fit する。
 `.h5` を作らずに raw（`ha<NN>_<番号>.dat`）を直接読む。1 つのランのボードは 2 つの storage（calltt、killua）に分かれるので両方読み、ラン 1 つの中でボード同士をトリガーカウンタ（`trig`）でそろえる（ボードの中で `trig` が戻ったら epoch を 1 つ進め、(epoch, `trig`) で組にする。EricaNext の `PSA_ReadData` と同じ）。
 複数のランは、ランごとに組にしてから方位角を足す（ランをまたいで `trig` を混ぜない）。
 
-**入力と条件は `PSA_analysis/param/pair_polarization.json` に書く**（既定でこれを読む）。ラン（`runs`）、比べるラン（`reference_runs`）、ビームの向き、カットなど。各キーの説明はファイルの `_doc`。
-ランは `"20261201_run05"` と書けば、`<nas>/20261201/{calltt,killua}/20261201_run05` を読む（`{"date": ..., "run": ...}` や、ディレクトリを直接 `{"name": ..., "dirs": [...]}` でもよい）。今はテスト用に手元の ha03 のラン（ペアは無い）が入っている。
+**入力と条件は `ETCC_analysis/param/pair_polarization.json` に書く**（既定でこれを読む）。ラン（`runs`）、比べるラン（`reference_runs`）、ビームの向き、カットなど。各キーの説明はファイルの `_doc`。
+今はテスト用に手元の ha03 のラン（ペアは無い）が入っている。
 コマンドラインで渡したものは JSON より優先する。`--runs` や `-i` を渡すと、JSON の `runs` と `reference_runs` は使わない。
 
 実行のしかた（WSL で。`/usr/bin/python3` を使う。numba、h5py、matplotlib が入っている方）:
@@ -162,21 +173,21 @@ python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
 ```bash
 cd ~/analysis_sm3_FM
 
-# 1. param/pair_polarization.json のとおりに流す（出力は既定で PSA_analysis/pair_output/pair_polarization.*）
-/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py
+# 1. ETCC_analysis/param/pair_polarization.json のとおりに流す（出力は既定で ETCC_analysis/output/pair_polarization.*）
+/usr/bin/python3 ETCC_analysis/pair_polarization.py
 
 # 2. 別の設定ファイル（ビーム試験用に写して書き換えたものなど）
-cp PSA_analysis/param/pair_polarization.json PSA_analysis/param/pair_beamtest.json   # runs などを書き換える
-/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py --config PSA_analysis/param/pair_beamtest.json
+cp ETCC_analysis/param/pair_polarization.json ETCC_analysis/param/pair_beamtest.json   # runs などを書き換える
+/usr/bin/python3 ETCC_analysis/pair_polarization.py --config ETCC_analysis/param/pair_beamtest.json
 
 # 3. ランをコマンドラインで（複数なら足す）。まず --max-files 2 で数ファイルだけ試すとよい
-/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
+/usr/bin/python3 ETCC_analysis/pair_polarization.py \
   --runs 20261201_run05 20261201_run07 --reference-runs 20261201_run06 \
-  --beam-dir 0 0 1 --max-files 2 -o PSA_analysis/pair_output/run05_07_vs_06_test
+  --beam-dir 0 0 1 --max-files 2 -o ETCC_analysis/output/run05_07_vs_06_test
 
 # 4. ディレクトリを直接（1 ラン。NAS 以外の場所にあるとき）
-/usr/bin/python3 PSA_analysis/src_onoda/pair_polarization.py \
-  -i /path/to/calltt/20261201_run05 /path/to/killua/20261201_run05 -o PSA_analysis/pair_output/run05
+/usr/bin/python3 ETCC_analysis/pair_polarization.py \
+  -i /path/to/calltt/20261201_run05 /path/to/killua/20261201_run05 -o ETCC_analysis/output/run05
 ```
 
 - 日付・ラン番号（`20261201`、`run05` など）は例。実際のランに置き換える。
@@ -187,32 +198,59 @@ cp PSA_analysis/param/pair_polarization.json PSA_analysis/param/pair_beamtest.js
 - 検出器の形（HA の並び）だけでも φ の分布は平らにならないので、偏光の大きさは比べるランとの比（`N / N_ref`）の fit で見る。偏光の向きを 90° 回したランと比べたときは、比の μ は偏光の効果の 2 倍（2 で割って読む）。偏光なしのランならそのまま。
 - 出力: `<out>.png`（全ランを足した φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<out>_pairs.csv`（ラン、epoch、trig ごとのペアの一覧）、`<out>.json`（全体とランごとの fit、条件、ボードごとのフレーム数と trig の戻った回数）。
 
-### ビーム試験: TPC の散乱点の 3 次元の分布からビームの道を出す（`TPC_analysis/beam_vertex.py`）
+### ビーム試験: TPC の散乱点の 3 次元の分布からビームの道を出す（`beam_vertex.py`）
 
 γ線ビームが TPC のガスの中で相互作用した点（対生成の頂点）を事象ごとに出し、その 3 次元の分布と、頂点に fit した直線（ビームの軸）を描く。
-TPC の raw（`tpc_enc_a*`、`tpc_enc_c*`）を直接読む（読み方は `check_tpc.py` と同じ）。ランの書き方と JSON の扱いは `pair_polarization.py` と同じで、既定で `TPC_analysis/param/beam_vertex.json` を読む。
+TPC の raw（`tpc_enc_a*`、`tpc_enc_c*`）を直接読む（読み方は `TPC_analysis/check_tpc.py` と同じ）。ランの書き方と JSON の扱いは `pair_polarization.py` と同じで、既定で `ETCC_analysis/param/beam_vertex.json` を読む。
 
 - **頂点**: 同じ uPIC のアノードとカソードの両方にヒットがある一番早いクロック（z が一番小さい点）。x、y はそのクロックのストリップの位置の平均。対生成の e± は頂点から前に飛ぶので、ビームが上から下（+Z）なら一番上流の点になる。ToT 補正と 3 次元の組み合わせ（偽の点が出る）はしない。
   EricaNext の `TOT_Skewness` の散乱点（歪度で飛跡の端を選ぶ）は電子 1 本の前提なので、対生成には使わない。
 - **z** = `velocity` × (クロック − `clock_offset`) + `z_gem`（EricaNext と同じ。既定値は EricaNext の `calib/tpc/drift_velocity.dat`）。**z の絶対値は、シンチ（HA）などの外のトリガーで時刻の原点が決まっているランでしか意味が無い**。TPC 自身のトリガーのラン（TPC_cal など）では、一番早いヒットがいつもトリガーの時刻に来るので、頂点が z の端に張り付く。
 - **fiducial**: 頂点が壁（±153.6 mm）とドリフト領域の両端（`z_gem`、317 mm）から `margin`（既定 10 mm）だけ内側。外（容器、天板、HA）で対生成して入ってきた e± の事象を落とす。
-- **ノイズ**: ボードの最初のファイルでフレームの `hot_fraction`（既定 5 %）以上で鳴るストリップは使わない。ヒットが `min_hits`（既定 10）より少ない事象は使わない。
+- **ノイズのカットはしない**（鳴りっぱなしのストリップもヒットの少ない事象も使う）。事象のヒットの数は `_vertices.csv` の `n_hits` に書くので、要れば後で切る。
 - **ビームの軸**: fiducial を通った頂点に 3 次元の直線を fit する（主成分。軸からの距離が `fit_cut_sigma` × RMS を超える頂点を外して fit し直す）。Z からの角度、方位角、軸からの距離の分布（R50、R68、R90）を出す。
 - メモリを抑えるため、フレームごとにクロックでまとめ（ヒットの数と位置の和）、早いクロックから `keep_clocks`（既定 16）個だけ持つ。
 
 ```bash
 cd ~/analysis_sm3_FM
 # JSON のとおり（今は 20261116 run03、ETCC のモード。NAS にある）
-/usr/bin/python3 TPC_analysis/beam_vertex.py
+/usr/bin/python3 ETCC_analysis/beam_vertex.py
 # ビーム試験のラン（まず --max-files 2 で試す。複数なら足す）
-/usr/bin/python3 TPC_analysis/beam_vertex.py --runs 20261123_run03 20261123_run04 --max-files 2 \
-  -o TPC_analysis/beam_output/run03_04_test
+/usr/bin/python3 ETCC_analysis/beam_vertex.py --runs 20261123_run03 20261123_run04 --max-files 2 \
+  -o ETCC_analysis/output/run03_04_test
 # ディレクトリを直接
-/usr/bin/python3 TPC_analysis/beam_vertex.py -i /path/to/calltt/20261123_run03 /path/to/killua/20261123_run03 \
-  -o TPC_analysis/beam_output/run03
+/usr/bin/python3 ETCC_analysis/beam_vertex.py -i /path/to/calltt/20261123_run03 /path/to/killua/20261123_run03 \
+  -o ETCC_analysis/output/run03
 ```
 
 出力: `<out>.png`（全頂点と fiducial の頂点の X–Y、X–Z、Y–Z の分布、fiducial の箱（黒の破線）、fit した軸（マゼンタ））、`<out>_vertices.csv`（事象ごとの頂点、fiducial かどうか、軸からの距離）、`<out>.json`（軸の fit、条件、ボードごとのフレーム数）。
+
+### ビームのタイミングに同期をとる: イベントの時刻の周期（`beam_period.py`）
+
+パルスのビーム（レーザー逆コンプトンなど）に同期をとるため、イベントの時刻の周期と位相を出す。時刻は各ボードのカウンタ:
+HA は `ha<NN>_*.dat` の clk（1 MHz）、TPC は `tpc_enc_*.raw` の N_time（100 us）。どちらも 32 bit で、2^32 で戻ったら足し直す。
+**ボードごとにカウンタの原点が違うので、ボードごと・ランごとに解析する**（位相はボードの間で比べられない。同じボードの中、または trig で組にしたイベントで使う）。
+
+- **パワースペクトル**: 時刻を `bin` で数え、`segment` 秒ずつ FFT して平均する（Leahy。雑音なら 2）。`spectra` に速い周期（パルス、既定 1 us / 1 s）と遅い周期（スピル、既定 1 ms / 100 s）を並べる。
+  いちばん高いピークの 1/k にも有意なピークがあれば、基本周波数はそちら。周波数が分かっていれば `frequency`（`--frequency`）に書く。
+- **偽のピーク**: 周期が `min_period_ticks`（既定 10 カウント。HA なら 10 us、TPC なら 1 ms）より短いものは探さない（カウンタの刻みや読み出しの時間構造が出る。線源のラン 20261029 run06 で 421 kHz に出た）。
+  畳んだ分布の Z^2_n が `n_sigma` に届かなければ、周期は無かったことにする。
+- **周期を詰める**: Z^2_n（`n_harmonics`）を、使う時間を 5 倍ずつ伸ばしながら最大にする。
+- **on-beam の窓**: 畳んだ位相の分布で、底から最大値までの `on_level`（既定 0.5）を超える、最大の位相を含む連続した範囲。位相と時刻の 2 次元図に傾きがあれば、カウンタとビームの周波数がずれている。
+
+```bash
+cd ~/analysis_sm3_FM
+# JSON のとおり
+/usr/bin/python3 ETCC_analysis/beam_period.py
+# ビーム試験のラン、HA だけ、まず数ファイル
+/usr/bin/python3 ETCC_analysis/beam_period.py --runs 20261201_run05 --sources ha --max-files 2
+# 周波数が分かっているとき（そのまわりで詰める）
+/usr/bin/python3 ETCC_analysis/beam_period.py --runs 20261201_run05 --frequency 1000
+```
+
+出力: `<out>_<ラン>.png`（基準のボードのレート、Δt の分布、スペクトル、畳んだ位相の分布と on-beam の窓、位相と時刻）、
+`<out>_<ラン>_events.csv`（基準のボード（周期が出た中で HA を先に、イベントの多いもの）のイベントごとの epoch、trig、カウンタ、位相、on-beam。trig で他の解析と組にする）、
+`<out>.json`（ボードごとの周波数、周期（秒とカウント）、位相の原点、ピークの位相、窓）。
 
 既定の入力・出力先は、どれもこのリポジトリの中からの相対で決まる。画面に図を出さずに保存だけするときは
 `MPLBACKEND=Agg` を付ける（XLaunch が無いと peak_search などが止まる）。

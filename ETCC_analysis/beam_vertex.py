@@ -2,7 +2,7 @@
 #
 # ビーム試験の簡易解析: TPC の散乱点（対生成の頂点）の 3 次元の分布から、γ線ビームの通った道を出す。
 #
-# raw（tpc_enc_a<NN>_<番号>.raw、tpc_enc_c<NN>_<番号>.raw）を直接読む。フレームの読み方は check_tpc.py と同じ。
+# raw（tpc_enc_a<NN>_<番号>.raw、tpc_enc_c<NN>_<番号>.raw）を直接読む。フレームの読み方は TPC_analysis/check_tpc.py と同じ。
 # 1 つのランのボードは 2 つの storage（calltt: アノード、killua: カソード）に分かれるので両方読み、
 # ラン 1 つの中でトリガーカウンタ（N_trg）でそろえる（ボードの中で N_trg が戻ったら epoch を 1 つ進める）。
 # 複数のランは、ランごとに頂点を出してから足す。
@@ -15,18 +15,18 @@
 #
 # fiducial: 頂点が壁（±153.6 mm）とドリフト領域の両端（z_gem、317 mm）から margin だけ内側。
 # 外で対生成して入ってきた e± の事象（頂点が壁や端に張り付く）を落とす。
-# ノイズ: ボードの最初のファイルで、フレームの hot_fraction 以上で鳴るストリップは使わない。
-# ヒットが min_hits より少ない事象は使わない。メモリを抑えるため、フレームごとにクロックでまとめ（数、位置の和）、
-# 早いクロックから keep_clocks 個だけ持つ（頂点には一番早いところしか要らない）。
+# ノイズのカット（鳴りっぱなしのストリップ、ヒットの少ない事象）はしない。
+# メモリを抑えるため、フレームごとにクロックでまとめ（数、位置の和）、早いクロックから keep_clocks 個だけ持つ
+# （頂点には一番早いところしか要らない）。
 #
 # ビームの軸: fiducial を通った頂点に 3 次元の直線を fit する（主成分。軸から遠い点を外して fit し直す）。
 #
-# 入力と条件は既定で TPC_analysis/param/beam_vertex.json から読む。コマンドラインで渡したものが優先する。
+# 入力と条件は既定で ETCC_analysis/param/beam_vertex.json から読む。コマンドラインで渡したものが優先する。
 #
 # 例:
-#   python3 TPC_analysis/beam_vertex.py                                   # JSON のとおり
-#   python3 TPC_analysis/beam_vertex.py --runs 20261123_run03 20261123_run04 --max-files 2
-#   python3 TPC_analysis/beam_vertex.py -i <calltt のラン> <killua のラン> -o TPC_analysis/beam_output/run03
+#   python3 ETCC_analysis/beam_vertex.py                                   # JSON のとおり
+#   python3 ETCC_analysis/beam_vertex.py --runs 20261123_run03 20261123_run04 --max-files 2
+#   python3 ETCC_analysis/beam_vertex.py -i <calltt のラン> <killua のラン> -o ETCC_analysis/output/run03
 #
 
 import argparse
@@ -41,16 +41,17 @@ import numpy as np
 from natsort import natsorted
 from numba import njit
 
-TPC_DIR = os.path.dirname(os.path.abspath(__file__))
+ETCC_DIR = os.path.dirname(os.path.abspath(__file__))
+# このリポジトリ (analysis_sm3_FM) の場所。JSON の中の相対パスはここから
+REPO_DIR = os.path.dirname(ETCC_DIR)
+TPC_DIR = os.path.join(REPO_DIR, "TPC_analysis")
 if TPC_DIR not in sys.path:
     sys.path.insert(0, TPC_DIR)
 
 from check_tpc import (HEADER, FOOTER, HEAD_SIZE, FADC_SIZE, RECORD_SIZE, MIN_FRAME_SIZE,  # noqa: E402
                        N_CLOCKS, N_FADC_CH, N_STRIPS, N_BOARDS_PER_UPIC, STRIP_AXES, read_word)
 
-# このリポジトリ (analysis_sm3_FM) の場所。JSON の中の相対パスはここから
-REPO_DIR = os.path.dirname(TPC_DIR)
-DEFAULT_CONFIG = os.path.join(TPC_DIR, "param", "beam_vertex.json")
+DEFAULT_CONFIG = os.path.join(ETCC_DIR, "param", "beam_vertex.json")
 FILE_RE = re.compile(r"^tpc_enc_([ac])(\d+)_(\d+)\.raw$")
 RUN_RE = re.compile(r"^(\d{8})_(run\d+)$")
 HALF_XY = 153.6        # ドリフト領域の半分の幅 [mm]（384 ストリップ × 0.4 mm）
@@ -60,14 +61,12 @@ DEFAULTS = {
     "nas": "/mnt/nas_eureka/SMILE-3FM_data",
     "storages": ["calltt", "killua"],
     "runs": [],
-    "out": "TPC_analysis/beam_output/beam_vertex",
+    "out": "ETCC_analysis/output/beam_vertex",
     "pitch_strip": 0.4,
     "clock_offset": 133.69,
     "velocity": 0.39358,
     "z_gem": 5.0,
     "margin": 10.0,
-    "min_hits": 10,
-    "hot_fraction": 0.05,
     "fit_cut_sigma": 3.0,
     "fit_iterations": 5,
     "keep_clocks": 16,
@@ -87,7 +86,6 @@ def parse_args():
     p.add_argument("-o", "--out", default=None, help="出力の名前（<out>.png、<out>_vertices.csv、<out>.json）")
     for k, t, h in (("clock_offset", float, "GEM 面のクロック [clock]"), ("velocity", float, "ドリフト速度 [mm/clock]"),
                     ("z_gem", float, "GEM 面の z [mm]"), ("margin", float, "fiducial の余白 [mm]"),
-                    ("min_hits", int, "事象の点の数の下限"), ("hot_fraction", float, "これ以上の割合の事象で鳴るストリップを除く"),
                     ("max_files", int, "ボードごとに読むファイルの数の上限（0 = 全部）"),
                     ("keep_clocks", int, "フレームごとに残す早いクロックの数")):
         p.add_argument("--" + k.replace("_", "-"), type=t, default=None, help=h)
@@ -118,7 +116,7 @@ def load_settings(args):
                 s[k] = in_repo(v) if k == "out" else v
         print(f"config: {config}")
     s["config"] = config
-    for k in ("out", "clock_offset", "velocity", "z_gem", "margin", "min_hits", "hot_fraction", "max_files", "keep_clocks"):
+    for k in ("out", "clock_offset", "velocity", "z_gem", "margin", "max_files", "keep_clocks"):
         v = getattr(args, k)
         if v is not None:
             s[k] = v
@@ -127,7 +125,7 @@ def load_settings(args):
     elif args.runs is not None:
         s["runs"] = list(args.runs)
     if not s["runs"]:
-        raise SystemExit("ランが無い: TPC_analysis/param/beam_vertex.json の runs、--runs か -i で渡す")
+        raise SystemExit("ランが無い: ETCC_analysis/param/beam_vertex.json の runs、--runs か -i で渡す")
 
     return s
 
@@ -232,31 +230,9 @@ def scan_frames(buf, trig, n_hits_out, offsets, n_records):
 
 
 @njit(cache=True, nogil=True)
-def count_strips(buf, offsets, n_records, counts):
-    """ストリップごとに、鳴ったフレームの数（鳴りっぱなしのストリップを探す）"""
-
-    seen = np.zeros(N_STRIPS, np.bool_)
-    for f in range(len(offsets)):
-        seen[:] = False
-        first = int(offsets[f]) + HEAD_SIZE + FADC_SIZE + 4
-        for index in range(n_records[f]):
-            start = first + RECORD_SIZE * index
-            if (read_word(buf, start) & 0x7ff) >= N_CLOCKS:
-                continue
-            for ch in range(N_FADC_CH):
-                w = read_word(buf, start + 4 * (4 - ch))
-                for bit in range(32):
-                    if (w >> bit) & 1:
-                        seen[32 * ch + bit] = True
-        for k in range(N_STRIPS):
-            if seen[k]:
-                counts[k] += 1
-
-
-@njit(cache=True, nogil=True)
-def fill_rows(buf, offsets, n_records, hot, keep_clocks, strip_pos,
+def fill_rows(buf, offsets, n_records, keep_clocks, strip_pos,
               row_frame, row_clock, row_count, row_sum, frame_hits):
-    """フレームごとに、鳴りっぱなしでないストリップのヒットをクロックごとにまとめ（数、位置の和）、
+    """フレームごとに、ヒットをクロックごとにまとめ（数、位置の和）、
     早いクロックから keep_clocks 個だけ行にする。frame_hits はフレームのヒットの数。返り値は行の数"""
 
     n_rows = 0
@@ -278,10 +254,8 @@ def fill_rows(buf, offsets, n_records, hot, keep_clocks, strip_pos,
                 w = read_word(buf, start + 4 * (4 - ch))
                 for bit in range(32):
                     if (w >> bit) & 1:
-                        k = 32 * ch + bit
-                        if not hot[k]:
-                            c += 1
-                            ssum += strip_pos[k]
+                        c += 1
+                        ssum += strip_pos[32 * ch + bit]
             if c > 0 and m < N_CLOCKS:
                 clk[m] = clock
                 cnt[m] = c
@@ -311,16 +285,7 @@ def scan_file(path):
     return buf, trig[:n].astype(np.int64), offsets[:n], nrec[:n]
 
 
-def find_hot(paths, fraction):
-    """最初のファイルで、フレームの fraction 以上で鳴るストリップ"""
-
-    buf, trig, offsets, nrec = scan_file(paths[0])
-    counts = np.zeros(N_STRIPS, np.int64)
-    count_strips(buf, offsets, nrec, counts)
-    return counts >= fraction * max(len(trig), 1)
-
-
-def read_board(paths, hot, strip_pos, keep_clocks):
+def read_board(paths, strip_pos, keep_clocks):
     """1 ボードの全ファイル: 行（event, clock, 数, 位置の和）と、フレームごとの (event, ヒットの数)。
     event = epoch * 2^32 + N_trg（ボードの中で N_trg が戻ったら epoch を進める）"""
 
@@ -347,7 +312,7 @@ def read_board(paths, hot, strip_pos, keep_clocks):
         rn = np.zeros(cap, np.int64)
         rs = np.zeros(cap, np.float64)
         fh = np.zeros(n, np.int64)
-        k = fill_rows(buf, offsets, nrec, hot, keep_clocks, strip_pos, rf, rc, rn, rs, fh)
+        k = fill_rows(buf, offsets, nrec, keep_clocks, strip_pos, rf, rc, rn, rs, fh)
         rf, rc, rn, rs = rf[:k], rc[:k], rn[:k], rs[:k]
         good = keep[rf]
         rows["event"].append(key[rf[good]])
@@ -370,16 +335,15 @@ def run_vertices(name, dirs, s):
     print(f"[{name}] boards: " + ", ".join(f"{sd}{b:02d}({len(f)})" for (sd, b), f in boards.items()))
     cols = {k: [] for k in ("event", "upic", "side", "axis", "clock", "count", "sum")}
     ev_parts, hit_parts = [], []
-    frames, resets, hot_list = {}, {}, {}
+    frames, resets = {}, {}
     for (side, board), paths in boards.items():
         t0 = time.time()
         upic, offset = board // N_BOARDS_PER_UPIC, board % N_BOARDS_PER_UPIC
         axis_name, sign, const = STRIP_AXES[upic][0 if side == "a" else 1]
         strip_pos = s["pitch_strip"] * (sign * (np.arange(N_STRIPS) + offset * N_STRIPS) + const)
-        hot = find_hot(paths, s["hot_fraction"])
-        rows, fev, fh, nf, nb = read_board(paths, hot, strip_pos, s["keep_clocks"])
+        rows, fev, fh, nf, nb = read_board(paths, strip_pos, s["keep_clocks"])
         tag = f"{side}{board:02d}"
-        frames[tag], resets[tag], hot_list[tag] = nf, nb, np.flatnonzero(hot).tolist()
+        frames[tag], resets[tag] = nf, nb
         if nb:
             print(f"[WARN] {tag}: N_trg が {nb} 回戻った（epoch で分けて組にする）")
         n = len(rows["event"])
@@ -392,18 +356,15 @@ def run_vertices(name, dirs, s):
         cols["sum"].append(rows["sum"])
         ev_parts.append(fev)
         hit_parts.append(fh)
-        print(f"  {tag}: {len(paths)} files, {nf} frames, hot strips {int(hot.sum())} ({time.time() - t0:.1f} s)", flush=True)
+        print(f"  {tag}: {len(paths)} files, {nf} frames ({time.time() - t0:.1f} s)", flush=True)
     h = {k: np.concatenate(v) for k, v in cols.items()}
 
-    # 事象のヒットの数（全ボードの和）
+    # 事象のヒットの数（全ボードの和。カットには使わず、CSV に書くだけ）
     fev = np.concatenate(ev_parts)
     fh = np.concatenate(hit_parts)
     ue, inv = np.unique(fev, return_inverse=True)
     n_hits_ev = np.bincount(inv.ravel(), weights=fh).astype(np.int64)
     n_events = int(np.sum(n_hits_ev > 0))
-    good_ev = ue[n_hits_ev >= s["min_hits"]]
-    keep = np.isin(h["event"], good_ev)
-    h = {k: v[keep] for k, v in h.items()}
 
     # (event, upic, clock) ごとに、アノードとカソードの両方がある一番早いもの
     key3 = np.column_stack([h["event"], h["upic"], h["clock"]])
@@ -424,9 +385,9 @@ def run_vertices(name, dirs, s):
     xy = sums[vi] / np.maximum(nums[vi], 1)
     z = s["velocity"] * (vtx[:, 2] - s["clock_offset"]) + s["z_gem"]
     nh = dict(zip(ue.tolist(), n_hits_ev.tolist()))
-    print(f"[{name}] events with hits {n_events}, with >= {s['min_hits']} hits {len(good_ev)}, with a vertex {len(vtx)}")
+    print(f"[{name}] events with hits {n_events}, with a vertex {len(vtx)}")
 
-    return dict(name=name, dirs=dirs, frames=frames, resets=resets, hot_strips=hot_list, events=n_events,
+    return dict(name=name, dirs=dirs, frames=frames, resets=resets, events=n_events,
                 vtx=np.column_stack([xy[:, 0], xy[:, 1], z]), vtx_event=vtx[:, 0], vtx_upic=vtx[:, 1], vtx_clock=vtx[:, 2],
                 vtx_nhits=np.array([nh[e] for e in vtx[:, 0].tolist()], dtype=np.int64))
 
@@ -477,7 +438,7 @@ def main():
     line = fit_line(V[fid], s["fit_cut_sigma"], s["fit_iterations"]) if fid.sum() >= 3 else None
     result = {"config": s["config"], "settings": {k: v for k, v in s.items() if k != "config"},
               "runs": [{"name": r["name"], "dirs": r["dirs"], "events": r["events"], "vertices": int(len(r["vtx"])),
-                        "fiducial": int(fiducial(r["vtx"], s).sum()), "hot_strips": r["hot_strips"],
+                        "fiducial": int(fiducial(r["vtx"], s).sum()),
                         "frames_per_board": r["frames"], "trig_resets_per_board": r["resets"]} for r in runs],
               "vertices": int(len(V)), "fiducial": int(fid.sum()),
               "fiducial_mm": {"x": [-HALF_XY + s["margin"], HALF_XY - s["margin"]], "y": [-HALF_XY + s["margin"], HALF_XY - s["margin"]],
@@ -498,9 +459,10 @@ def main():
                                                    (0, 2, (-lim, lim), zr, ("X [mm] (E)", "Z [mm] (down)")),
                                                    (1, 2, (-lim, lim), zr, ("Y [mm] (S)", "Z [mm] (down)")))):
             ax = axs[row, col]
-            if len(P):
-                hh = ax.hist2d(P[:, i], P[:, j], bins=[np.linspace(*xr, 82), np.linspace(*yr, 82)], cmap="turbo",
-                               norm=LogNorm(vmin=1))
+            bins = [np.linspace(*xr, 82), np.linspace(*yr, 82)]
+            # 範囲の中に点が無いと LogNorm の上限が 0 になって描けない
+            if len(P) and np.histogram2d(P[:, i], P[:, j], bins=bins)[0].max() >= 1:
+                hh = ax.hist2d(P[:, i], P[:, j], bins=bins, cmap="turbo", norm=LogNorm(vmin=1))
                 plt.colorbar(hh[3], ax=ax, label="vertices / bin")
             m = s["margin"]
             box = {0: (-HALF_XY + m, HALF_XY - m), 1: (-HALF_XY + m, HALF_XY - m), 2: (s["z_gem"] + m, Z_TOP - m)}
