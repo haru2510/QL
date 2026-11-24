@@ -1,0 +1,75 @@
+{
+  "_doc": {
+    "_": "track_runs.py専用。11/24 run00〜07の記録された全完成rawヒットを選別なしで積算。run00〜05を走査し、run06・07は保存済みカット前積算を足す。",
+    "data_root": "rawがあるSSDの親ディレクトリ。直下のcallttとkilluaを読む。",
+    "storages": "アノードとカソードの保存先。",
+    "runs": "最終的に合算する全ラン。",
+    "result_dir": "解析結果の正規保存先。outputはGit対象外。",
+    "pitch_strip": "ストリップ間隔。現在の積算ビンは0.4 mmを前提。",
+    "velocity": "ドリフト速度。",
+    "clock_offset": "GEM面に対応するクロック。",
+    "z_gem": "GEM面のZ座標。",
+    "z_veto": "このZ以下のrawヒットが1個でもあればイベント全体を除外。XYと高Z側は除外しない。",
+    "inputs": "run06_07_track_histogram: 検証済みrun06・07の保存積算NPZ。all_hitsだけを使い、Z側除外後の配列は使わない。",
+    "outputs": {
+      "run_cache_dir": "各追加ランの全rawヒットNPZ・入力一覧JSON・図。",
+      "combined_histogram": "run00〜07の全rawヒット積算NPZ。",
+      "combined_metadata": "全データの件数・入力と色範囲。",
+      "combined_figure_prefix": "合算PNGの保存名。Zとclock、contrastとfullscaleを付けて4枚作る。"
+    },
+    "runs_to_scan": "全データ積算で新規走査するrun00〜05。run06・07はinputs.run06_07_track_histogramのカット前積算を足す。",
+    "color_percentiles": "空ビンを除く表示ビンの下限・上限の百分位。カラースケールだけを変更し、ヒット数・イベントは選別しない。",
+    "include_tmp": "true: 完成rawに加え末尾.raw.tmpの有効フレームも回収。完成rawとの重複は除く。不完全な末尾フレームはデコーダで落とす。"
+  },
+  "_units": {
+    "pitch_strip": "mm",
+    "velocity": "mm/clock",
+    "clock_offset": "clock",
+    "z_gem": "mm",
+    "z_veto": "mm",
+    "color_percentiles": "percentile"
+  },
+  "data_root": "/mnt/d/UVSOR2026_late",
+  "storages": [
+    "calltt",
+    "killua"
+  ],
+  "runs": [
+    "20261124_run00",
+    "20261124_run01",
+    "20261124_run02",
+    "20261124_run03",
+    "20261124_run04",
+    "20261124_run05",
+    "20261124_run06",
+    "20261124_run07"
+  ],
+  "result_dir": "ETCC_cal/output/20261124_run00_07",
+  "pitch_strip": 0.4,
+  "velocity": 0.39358,
+  "clock_offset": 133.69,
+  "z_gem": 5.0,
+  "z_veto": 15.0,
+  "inputs": {
+    "run06_07_track_histogram": "ETCC_cal/output/20261124_run06_07/tracks/track_sum.npz"
+  },
+  "outputs": {
+    "run_cache_dir": "ETCC_cal/output/20261124_run00_07/runs",
+    "combined_histogram": "ETCC_cal/output/20261124_run00_07/tracks/all_runs.npz",
+    "combined_metadata": "ETCC_cal/output/20261124_run00_07/tracks/all_runs.json",
+    "combined_figure_prefix": "ETCC_cal/output/20261124_run00_07/tracks/all_runs"
+  },
+  "runs_to_scan": [
+    "20261124_run00",
+    "20261124_run01",
+    "20261124_run02",
+    "20261124_run03",
+    "20261124_run04",
+    "20261124_run05"
+  ],
+  "color_percentiles": [
+    10,
+    99.5
+  ],
+  "include_tmp": true
+}

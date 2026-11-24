@@ -63,3 +63,18 @@
 
 # 最初にもらった元のコード (src_onoda はここから直したもの。比べるために残す)
 !/PSA_analysis/original/
+
+# レビュー用のETCCビーム較正コード。大きな結果と生データは追跡しない。
+!/ETCC_cal/
+/ETCC_cal/*
+!/ETCC_cal/*.py
+!/ETCC_cal/README.md
+!/ETCC_cal/param/
+/ETCC_cal/param/*
+!/ETCC_cal/param/20261124_run06_07.json
+
+# 外部入力先・ランを指定するETCC設定
+!/ETCC_cal/config/
+/ETCC_cal/config/*
+!/ETCC_cal/config/README.md
+!/ETCC_cal/config/*.json

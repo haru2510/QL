@@ -1,0 +1,66 @@
+{
+  "_doc": {
+    "_": "20261124 run06・07の解析条件。相対パスはリポジトリ基準。",
+    "data_root": "rawがあるSSDの親ディレクトリ。直下のcallttとkilluaを読む。",
+    "storages": "アノードとカソードの保存先。",
+    "runs": "個別にトリガーを対応付けてから合算するラン。",
+    "result_dir": "解析結果の正規保存先。outputはGit対象外。",
+    "pitch_strip": "ストリップ間隔。現在の積算ビンは0.4 mmを前提。",
+    "velocity": "ドリフト速度。",
+    "clock_offset": "GEM面に対応するクロック。",
+    "z_gem": "GEM面のZ座標。",
+    "z_veto": "このZ以下のrawヒットが1個でもあればイベント全体を除外。XYと高Z側は除外しない。",
+    "inputs": "vertices_all: 全頂点CSV。event_points: 個別候補のTPC投影・シンチ座標JSON。scintillator_counts: 全rawシンチ件数JSON。raw入力はdata_rootとruns。",
+    "outputs": {
+      "veto_dir": "イベント単位のZ側除外NPZを置くフォルダ。",
+      "vertices_selected": "select_vertices.pyが作り、beam_axis.pyとplot_vertices.pyが読む頂点CSV。",
+      "vertex_figure": "追加XY選別なしの頂点投影図。",
+      "selection_summary": "全トリガーを分母にした件数表。",
+      "track_histogram": "全rawヒットの積算配列。plot-onlyもここから読む。",
+      "track_metadata": "raw走査で求める件数・入力一覧。select_vertices.pyもここから読む。",
+      "track_figure": "カット前後の飛跡積算PNG。",
+      "beam_axis_prefix": "fitの保存名。拡張子を付けずに指定し、.json・.png・_local.pngを作る。",
+      "event_figure_prefix": "保存済みイベント点群から作るPNG・HTMLの保存名（拡張子なし）。",
+      "scintillator_figure": "保存済み全rawシンチ件数から作るブロック別分布PNG。"
+    }
+  },
+  "_units": {
+    "pitch_strip": "mm",
+    "velocity": "mm/clock",
+    "clock_offset": "clock",
+    "z_gem": "mm",
+    "z_veto": "mm"
+  },
+  "data_root": "/mnt/d/UVSOR2026_late",
+  "storages": [
+    "calltt",
+    "killua"
+  ],
+  "runs": [
+    "20261124_run06",
+    "20261124_run07"
+  ],
+  "result_dir": "ETCC_cal/output/20261124_run06_07",
+  "pitch_strip": 0.4,
+  "velocity": 0.39358,
+  "clock_offset": 133.69,
+  "z_gem": 5.0,
+  "z_veto": 15.0,
+  "inputs": {
+    "vertices_all": "ETCC_cal/output/20261124_run06_07/vertices/all.csv",
+    "event_points": "ETCC_cal/output/20261124_run06_07/events/run06_trig22204.json",
+    "scintillator_counts": "ETCC_cal/output/20261124_run06_07/scintillator/all_raw_blocks.json"
+  },
+  "outputs": {
+    "veto_dir": "ETCC_cal/output/20261124_run06_07/selection",
+    "vertices_selected": "ETCC_cal/output/20261124_run06_07/vertices/z0veto.csv",
+    "vertex_figure": "ETCC_cal/output/20261124_run06_07/vertices/no_xy_selection.png",
+    "selection_summary": "ETCC_cal/output/20261124_run06_07/selection/summary.json",
+    "track_histogram": "ETCC_cal/output/20261124_run06_07/tracks/track_sum.npz",
+    "track_metadata": "ETCC_cal/output/20261124_run06_07/tracks/track_sum.json",
+    "track_figure": "ETCC_cal/output/20261124_run06_07/tracks/track_sum.png",
+    "beam_axis_prefix": "ETCC_cal/output/20261124_run06_07/beam_axis/axis_z0veto",
+    "event_figure_prefix": "ETCC_cal/output/20261124_run06_07/events/run06_trig22204",
+    "scintillator_figure": "ETCC_cal/output/20261124_run06_07/scintillator/all_raw_blocks.png"
+  }
+}

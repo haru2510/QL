@@ -9,30 +9,41 @@
     "geometry": "ブロックの位置(EricaNext の calib/psa/geometry.csv の写し、ch = ADC 番号)",
     "beam_dir": "ビームの向き(検出器の座標。X: 東、Y: 南、Z: 下)。上から下へなら [0, 0, 1]、東から西へなら [-1, 0, 0]",
     "ref_axis": "方位角 phi = 0 の軸(ビームに垂直な面に射影して使う)",
-    "hg_min": "ヒットとして数える HG の下限 [ADC]",
-    "peak_id_window": "トリガー時刻のヒットだけ使う: ボードごとの peak_id の最頻値 ± この値。負なら使わない",
-    "n_hits": "選ぶイベントのヒットの数(対生成なら 2)",
+    "n_hits": "選ぶイベントの raw ヒット数（DataCount フラグを数える。HG・peak_id の追加カットなし。対生成の候補は 2）",
     "min_distance": "2 点の距離の下限 [mm]",
     "bins": "方位角のビンの数(0-180°)",
     "max_files": "ボードごとに読むファイルの数の上限(0 = 全部。試しに速く流すとき)",
     "include_tmp": "true: 書きかけの .dat.tmp も読む"
   },
   "_units": {
-    "hg_min": "ADC",
     "min_distance": "mm"
   },
   "runs": [
-    {"name": "test_20261029_run06", "dirs": ["PSA_analysis/data/cal_psa/run_kyoto/20261029_run06"]}
+    {
+      "name": "test_20261029_run06",
+      "dirs": [
+        "PSA_analysis/data/cal_psa/run_kyoto/20261029_run06"
+      ]
+    }
   ],
   "reference_runs": [],
   "nas": "/mnt/nas_eureka/SMILE-3FM_data",
-  "storages": ["calltt", "killua"],
+  "storages": [
+    "calltt",
+    "killua"
+  ],
   "out": "ETCC_analysis/output/pair_polarization",
   "geometry": "PSA_analysis/param/geometry_sm3.csv",
-  "beam_dir": [0.0, 0.0, 1.0],
-  "ref_axis": [1.0, 0.0, 0.0],
-  "hg_min": 1000.0,
-  "peak_id_window": 3,
+  "beam_dir": [
+    0.0,
+    0.0,
+    1.0
+  ],
+  "ref_axis": [
+    1.0,
+    0.0,
+    0.0
+  ],
   "n_hits": 2,
   "min_distance": 0.0,
   "bins": 18,

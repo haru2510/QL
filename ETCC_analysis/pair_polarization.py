@@ -11,6 +11,7 @@
 # 入力と条件は、既定で ETCC_analysis/param/pair_polarization.json から読む（ラン、比べるラン、ビームの向き、カットなど）。
 # コマンドラインで渡したものはそちらが優先する。-i / --runs を渡すと、JSON のラン（と比べるラン）は使わない。
 #
+# ヒット数は raw の DataCount フラグを数える（HG・peak_id の追加カットなし）。
 # ヒットの位置はブロック（8x8 の結晶）の中心。対生成の e+ e- は HG が飽和しやすく、
 # 飽和したヒットは重心がブロックの中央に寄るので、ピクセルまでは求めない。
 # 位置は PSA_analysis/param/geometry_sm3.csv（EricaNext の calib/psa/geometry.csv の写し）。
@@ -65,8 +66,6 @@ DEFAULTS = {
     "geometry": "PSA_analysis/param/geometry_sm3.csv",
     "beam_dir": [0., 0., 1.],
     "ref_axis": [1., 0., 0.],
-    "hg_min": 1000.,
-    "peak_id_window": 3,
     "n_hits": 2,
     "min_distance": 0.,
     "bins": 18,
@@ -93,9 +92,6 @@ def parse_args():
                    help="ビームの向き（検出器の座標。X: 東、Y: 南、Z: 下）。既定は上から下へ (0, 0, 1)")
     p.add_argument("--ref-axis", type=float, nargs=3, default=None,
                    help="方位角の基準の軸（ビームに垂直な面に射影して使う）。既定 X（東）")
-    p.add_argument("--hg-min", type=float, default=None, help="ヒットとして数える HG の下限 [ADC]（既定 1000）")
-    p.add_argument("--peak-id-window", type=int, default=None,
-                   help="トリガー時刻のヒットだけ使う: ボードごとの peak_id の最頻値 ± この値（既定 3）。負なら使わない")
     p.add_argument("--n-hits", type=int, default=None, help="選ぶイベントのヒットの数（既定 2）")
     p.add_argument("--min-distance", type=float, default=None, help="2 点の距離の下限 [mm]（既定 0）")
     p.add_argument("--bins", type=int, default=None, help="方位角のビンの数（0-180 deg、既定 18）")
@@ -133,7 +129,7 @@ def load_settings(args):
         print(f"config: {config}")
     s["config"] = config
 
-    for k in ("out", "geometry", "beam_dir", "ref_axis", "hg_min", "peak_id_window", "n_hits",
+    for k in ("out", "geometry", "beam_dir", "ref_axis", "n_hits",
               "min_distance", "bins", "max_files", "include_tmp"):
         v = getattr(args, k)
         if v is not None:
@@ -257,24 +253,6 @@ def read_hits(boards):
     return hits, n_frames, n_resets
 
 
-def select_on_time(hits, hg_min, window):
-    """HG の下限と、ボードごとの peak_id の最頻値 ± window"""
-
-    m = hits["hg"] >= hg_min
-    windows = {}
-
-    if window >= 0:
-        on = np.zeros(len(m), dtype=bool)
-        for b in np.unique(hits["board"][m]):
-            mb = m & (hits["board"] == b)
-            mode = int(np.bincount(hits["peak_id"][mb]).argmax())
-            windows[int(b)] = (mode - window, mode + window)
-            on |= mb & (np.abs(hits["peak_id"] - mode) <= window)
-        m = on
-
-    return m, windows
-
-
 def load_geometry(path):
 
     rows = [l for l in open(path) if l.strip() and not l.startswith("#")]
@@ -287,15 +265,14 @@ def load_geometry(path):
     return geo
 
 
-def build_pairs(hits, mask, geo, n_hits, min_distance):
-    """(epoch, trig) ごとにまとめ、ヒットが n_hits 個（geometry にあるもの）のイベントの 2 点"""
+def build_pairs(hits, geo, n_hits, min_distance):
+    """raw ヒットを (epoch, trig) ごとに数え、ちょうど n_hits 個のイベントからペアを作る。"""
 
-    idx = np.flatnonzero(mask)
-    in_geo = np.array([(int(hits["board"][i]), int(hits["ch"][i])) in geo for i in idx], dtype=bool)
-    missing = sorted(set((int(hits["board"][i]), int(hits["ch"][i])) for i in idx[~in_geo]))
+    idx = np.arange(len(hits["event"]))
+    missing = sorted(set((int(hits["board"][i]), int(hits["ch"][i])) for i in idx
+                         if (int(hits["board"][i]), int(hits["ch"][i])) not in geo))
     if missing:
-        print(f"[WARN] geometry に無いブロックのヒットは使わない: {missing}")
-    idx = idx[in_geo]
+        print(f"[WARN] geometry に無いブロックもヒット数に含めるが、そのペアの方位角は求めない: {missing}")
 
     order = np.argsort(hits["event"][idx], kind="stable")
     idx = idx[order]
@@ -308,8 +285,12 @@ def build_pairs(hits, mask, geo, n_hits, min_distance):
     if n_hits == 2:
         for s in starts[counts == 2]:
             i, j = idx[s:s + 2]
-            p1 = geo[(int(hits["board"][i]), int(hits["ch"][i]))]
-            p2 = geo[(int(hits["board"][j]), int(hits["ch"][j]))]
+            key1 = (int(hits["board"][i]), int(hits["ch"][i]))
+            key2 = (int(hits["board"][j]), int(hits["ch"][j]))
+            if key1 not in geo or key2 not in geo:
+                continue
+            p1 = geo[key1]
+            p2 = geo[key2]
             if np.linalg.norm(p2 - p1) < min_distance:
                 continue
             pairs.append((int(hits["epoch"][i]), int(hits["trig"][i]), i, j, p1, p2))
@@ -372,12 +353,11 @@ def analyse_run(name, dirs, s, geo, e1, e2):
         raise SystemExit(f"[{name}] raw ファイル（ha<NN>_<番号>.dat）が無い: {dirs}")
     print(f"[{name}] boards: " + ", ".join(f"ha{b:02d}({len(f)})" for b, f in boards.items()))
     hits, n_frames, n_resets = read_hits(boards)
-    mask, windows = select_on_time(hits, s["hg_min"], s["peak_id_window"])
-    pairs, multiplicity = build_pairs(hits, mask, geo, s["n_hits"], s["min_distance"])
+    pairs, multiplicity = build_pairs(hits, geo, s["n_hits"], s["min_distance"])
     phi = azimuth(pairs, e1, e2)
-    print(f"[{name}] hits {len(hits['trig'])}, after HG / peak_id {int(mask.sum())}, events with {s['n_hits']} hits: {len(pairs)}")
+    print(f"[{name}] raw hits {len(hits['trig'])}, selected pairs: {len(pairs)}")
 
-    return dict(name=name, dirs=dirs, hits=hits, n_frames=n_frames, n_resets=n_resets, windows=windows,
+    return dict(name=name, dirs=dirs, hits=hits, n_frames=n_frames, n_resets=n_resets,
                 pairs=pairs, multiplicity=multiplicity, phi=phi)
 
 
@@ -406,8 +386,8 @@ def main():
     def run_summary(r):
         h = hist([r["phi"]])
         return {"name": r["name"], "dirs": r["dirs"], "pairs": len(r["pairs"]), "frames_per_board": r["n_frames"],
-                "trig_resets_per_board": r["n_resets"], "peak_id_windows": r["windows"],
-                "multiplicity_after_cuts": r["multiplicity"].tolist(),
+                "trig_resets_per_board": r["n_resets"],
+                "multiplicity_raw": r["multiplicity"].tolist(),
                 "fit_counts": fit_modulation(centres, h.astype(float), np.sqrt(np.maximum(h, 1.)))}
 
     result = {"config": s["config"], "settings": {k: v for k, v in s.items() if k not in ("config",)},
@@ -470,11 +450,11 @@ def main():
     ax = axs[col + 1]
     mult = np.sum([r["multiplicity"][:8] for r in runs], axis=0)
     ax.bar(np.arange(len(mult)), mult, color="0.4")
-    ax.set(xlabel="hits per trigger (after HG / peak_id)", ylabel="triggers", yscale="log", title="multiplicity")
+    ax.set(xlabel="raw scintillator hits per trigger", ylabel="triggers", yscale="log", title="multiplicity")
     ax.grid(alpha=.3)
     names = ", ".join(r["name"] for r in runs) + ((" vs " + ", ".join(r["name"] for r in refs)) if refs else "")
     fig.suptitle(f"{os.path.basename(out)}: {names}\nbeam {tuple(s['beam_dir'])}, reference axis -> {np.round(e1, 3).tolist()}, "
-                 f"HG >= {s['hg_min']:g}, peak_id window {s['peak_id_window']}")
+                 "raw hit flags (no HG / peak_id cuts)")
     fig.tight_layout()
     fig.savefig(f"{out}.png", dpi=120)
 

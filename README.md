@@ -148,6 +148,8 @@ python3 PSA_analysis/src_onoda/energy_calib.py --ha ha02
 
 ## ETCC のビーム試験の解析（`ETCC_analysis/`）
 
+2026-11-24のビーム位置・Z側カット・飛跡積算の正規コードと結果は [`ETCC_cal/README.md`](ETCC_cal/README.md) を参照する。
+
 HA と TPC の両方を使うビーム試験の解析は `ETCC_analysis/` に置く。入力と条件の JSON は `ETCC_analysis/param/`、出力は既定で `ETCC_analysis/output/`。
 どれも raw を直接読み、ランは `"20261201_run05"` と書けば `<nas>/20261201/{calltt,killua}/20261201_run05` を読む（`{"date": ..., "run": ...}` や、ディレクトリを直接 `{"name": ..., "dirs": [...]}` でもよい）。
 コマンドラインで渡したものは JSON より優先する。
@@ -194,13 +196,13 @@ cp ETCC_analysis/param/pair_polarization.json ETCC_analysis/param/pair_beamtest.
 - ヒットの位置はブロック（8×8 の結晶）の中心で、`PSA_analysis/param/geometry_sm3.csv`（EricaNext の `calib/psa/geometry.csv` の写し）から取る。e± は HG が飽和しやすく、飽和すると重心がブロックの中央に寄るので、ピクセルまでは求めない。
 - ch は ADC 番号（1, 2, 4, 8, 16, 32 → 0〜5、EricaNext と同じ）。`psa_decode.py` の `.h5` の ch（5 − ch）とは逆なので注意。
 - 座標は検出器の座標（X: 東、Y: 南、Z: 下）。`beam_dir` はビームの向き（上から下へなら `[0, 0, 1]`、東から西へなら `[-1, 0, 0]`）、`ref_axis` は φ = 0 の軸（ビームに垂直な面に射影して使う）。試験の配置に合わせる。
-- ヒットは HG ≥ `hg_min`（既定 1000 ADC）で、peak_id がボードごとの最頻値 ± `peak_id_window`（既定 3）のもの。
+- ヒット数はrawのDataCountフラグを数える。HG・peak_idの追加カットはしない。
 - 検出器の形（HA の並び）だけでも φ の分布は平らにならないので、偏光の大きさは比べるランとの比（`N / N_ref`）の fit で見る。偏光の向きを 90° 回したランと比べたときは、比の μ は偏光の効果の 2 倍（2 で割って読む）。偏光なしのランならそのまま。
 - 出力: `<out>.png`（全ランを足した φ の分布と fit、比、選んだペアのブロック、1 トリガーのヒットの数）、`<out>_pairs.csv`（ラン、epoch、trig ごとのペアの一覧）、`<out>.json`（全体とランごとの fit、条件、ボードごとのフレーム数と trig の戻った回数）。
 
 ### ビーム試験: TPC の散乱点の 3 次元の分布からビームの道を出す（`beam_vertex.py`）
 
-γ線ビームが TPC のガスの中で相互作用した点（対生成の頂点）を事象ごとに出し、その 3 次元の分布と、頂点に fit した直線（ビームの軸）を描く。
+γ線ビームが TPC のガスの中で相互作用した点（対生成の頂点）の推定値を事象ごとに出す。全頂点へのPCA軸は背景に引かれたため不採用。採用する軸は `ETCC_cal/beam_axis.py` の局所ピーク中心fit。
 TPC の raw（`tpc_enc_a*`、`tpc_enc_c*`）を直接読む（読み方は `TPC_analysis/check_tpc.py` と同じ）。ランの書き方と JSON の扱いは `pair_polarization.py` と同じで、既定で `ETCC_analysis/param/beam_vertex.json` を読む。
 
 - **頂点**: 同じ uPIC のアノードとカソードの両方にヒットがある一番早いクロック（z が一番小さい点）。x、y はそのクロックのストリップの位置の平均。対生成の e± は頂点から前に飛ぶので、ビームが上から下（+Z）なら一番上流の点になる。ToT 補正と 3 次元の組み合わせ（偽の点が出る）はしない。
