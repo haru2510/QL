@@ -202,7 +202,7 @@ TPC の raw（`tpc_enc_a*`、`tpc_enc_c*`）を直接読む（読み方は `chec
 
 ```bash
 cd ~/analysis_sm3_FM
-# JSON のとおり（今はこの PC の 6 月の TPC_cal のテストラン）
+# JSON のとおり（今は 20261116 run03、ETCC のモード。NAS にある）
 /usr/bin/python3 TPC_analysis/beam_vertex.py
 # ビーム試験のラン（まず --max-files 2 で試す。複数なら足す）
 /usr/bin/python3 TPC_analysis/beam_vertex.py --runs 20261123_run03 20261123_run04 --max-files 2 \

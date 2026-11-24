@@ -1,7 +1,7 @@
 {
   "_doc": {
     "_": "TPC_analysis/beam_vertex.py の既定の入力と条件。コマンドラインで渡したものはそちらが優先する(-i / --runs を渡すと runs は使わない)。相対パスはリポジトリ(analysis_sm3_FM)から",
-    "runs": "解析するラン。複数なら、ランごとに頂点を出してから足す。書き方は 3 通り: \"20261123_run03\"(<nas>/<日付>/<storages>/<日付>_runNN を読む)、{\"date\": \"20261123\", \"run\": \"run03\"}、{\"name\": \"<名前>\", \"dirs\": [\"<calltt のラン>\", \"<killua のラン>\"]}。今はこの PC にある 6 月の TPC_cal のテストラン。ビーム試験では例えば [\"20261123_run03\", \"20261123_run04\"]",
+    "runs": "解析するラン。ETCC のモード(シンチのトリガー)のランを使う(TPC 自身のトリガーの TPC_cal では、一番早いヒットがいつもトリガーの時刻に来るので z が端に張り付く)。複数なら、ランごとに頂点を出してから足す。書き方は 3 通り: \"20261123_run03\"(<nas>/<日付>/<storages>/<日付>_runNN を読む)、{\"date\": \"20261123\", \"run\": \"run03\"}、{\"name\": \"<名前>\", \"dirs\": [\"<calltt のラン>\", \"<killua のラン>\"]}。今は 20261116 run03(ETCC、線源あり)。ビーム試験ではそのランに書き換える",
     "nas": "\"<日付>_runNN\" の形のランを探す NAS のディレクトリ",
     "storages": "1 つのランのボードが分かれている storage(calltt: アノード、killua: カソード。両方読む)",
     "out": "出力の名前(<out>.png、<out>_vertices.csv、<out>.json)。ディレクトリが無ければ作る",
@@ -25,10 +25,13 @@
     "margin": "mm"
   },
   "runs": [
-    {"name": "test_20260623_TPC_cal", "dirs": ["/home/onoda/ANLNext/Erica_git_dev/EricaNext/test.data/run_20260623T072649Z"]}
+    "20261116_run03"
   ],
   "nas": "/mnt/nas_eureka/SMILE-3FM_data",
-  "storages": ["calltt", "killua"],
+  "storages": [
+    "calltt",
+    "killua"
+  ],
   "out": "TPC_analysis/beam_output/beam_vertex",
   "pitch_strip": 0.4,
   "clock_offset": 133.69,
