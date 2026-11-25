@@ -16,7 +16,8 @@
 | fitの係数・各Z断面の中心・感度確認 | [beam_axis/axis_z0veto.json](output/20261124_run06_07/beam_axis/axis_z0veto.json) |
 | 全TPCヒットのXZ・YZ積算、カット前後 | [tracks/track_sum.png](output/20261124_run06_07/tracks/track_sum.png) |
 | SSDなしの飛跡積算再描画用ヒストグラム | [tracks/track_sum.npz](output/20261124_run06_07/tracks/track_sum.npz) |
-| 全イベントの分母・残存数 | [selection/summary.json](output/20261124_run06_07/selection/summary.json) |
+| 全イベントの分母・残存数、選別後のシンチヒットの割合（`scintillator`） | [selection/summary.json](output/20261124_run06_07/selection/summary.json) |
+| Z側除外の前後のシンチヒット数の分布（円グラフ・ヒストグラム） | [selection/scint_hit_multiplicity.png](output/20261124_run06_07/selection/scint_hit_multiplicity.png) |
 | 全rawシンチヒットのブロック別分布 | [scintillator/all_raw_blocks.png](output/20261124_run06_07/scintillator/all_raw_blocks.png) |
 | run06・trigger 22204の候補表示 | [events/run06_trig22204.png](output/20261124_run06_07/events/run06_trig22204.png) / [回転できるHTML](output/20261124_run06_07/events/run06_trig22204.html) |
 
@@ -53,11 +54,13 @@ ETCC_cal/
   param/20261124_run06_07.json  整理前の設定を残した互換用コピー
   track_sum.py              raw全ヒットの積算、除外集合の再確認、イベント数集計
   track_runs.py             run00〜07全ヒットのmm/clock積算とカラー調整
-  select_vertices.py        保存済み全頂点へイベント単位のZ側除外を適用
+  select_vertices.py        保存済み全頂点へイベント単位のZ側除外を適用、選別前後のシンチヒットフラグを集計
   beam_axis.py              Zごとの局所ピーク中心と軸のfit、全体図と局所図
+  pixel_polarization.py      HG/LGピクセル方位角、任意のビーム直線・raw2選別
   plot_vertices.py          追加のXY選別なしの頂点投影
   plot_saved_event.py        保存した候補点群からPNG・HTMLを再描画
   plot_scintillator.py       保存した全rawシンチ件数から再描画
+  plot_scint_hits.py         Z側除外の前後のシンチヒット数の分布を描く（SSD不要）
   output/20261124_run00_07/    全8ランの選別なしraw積算・クロック表示
   output/20261124_run06_07/
     vertices/               全頂点・選別後頂点のCSVと図
@@ -77,7 +80,7 @@ rawのフレーム仕様とストリップ配置は既存の [`ETCC_analysis/bea
 
 ## 外部入力の設定
 
-[`config/`](config/README.md) に設定JSONを置く。run06・07用の6本は引数省略時に `config/20261124_run06_07.json` を読む。`param/` は互換用コピー。
+[`config/`](config/README.md) に設定JSONを置く。run06・07用コードは引数省略時に `config/20261124_run06_07.json` を読む。`param/` は互換用コピー。
 
 `data_root`・`storages`・`runs` がraw入力、`inputs.vertices_all` が全頂点CSV。`outputs` で選別後CSV、各PNG、NPZ、集計JSON、fitの保存名を指定する。選別後のCSVは下流の描画・軸fitが `outputs.vertices_selected` から読む。
 
@@ -277,6 +280,71 @@ HG用較正のLGへの流用は暫定であり、HGとLGの位置応答が同じ
   --out ETCC_cal/output/20261124_run06_07/events/lg/run06_trig22204_lg
 ```
 
+## HG/LGのピクセル位置を使う偏光解析
+
+[`pixel_polarization.py`](pixel_polarization.py) は同じrawからHG重心版・LG重心版の2通りを作る。
+ブロック中心ではなく、`position_haNN.csv` の64ピークをthin-plate splineで補正したピクセル(n,m)の中心を使用する。
+ペアCSVにはrun・epoch・trig・rawヒット数・ビーム距離・両ヒットのboard/ch/n/m・XYZ・方位角・重みを保存する。
+HGもLGも、対象gainがADC飽和、積分が非正、較正なし、配置なし、または8×8外なら位置を採用しない。この解析では無効ピクセルをブロック中心で代用しない。
+LGにはHGの位置較正を暫定流用している。複数ピクセルが発光したときには光量重心が混ざるため、推定した1ピクセルが実際の全エネルギー付与位置を表すとは限らない。
+
+入力・出力は同じ `config/20261124_run06_07.json` の `inputs`・`outputs`、切替条件は `polarization` に指定する。
+
+| キー | 既定値 | 意味 |
+| --- | --- | --- |
+| `require_exactly_two_raw_hits` | true | ピクセルで除外する前のraw DataCountフラグがちょうど2個。falseなら有効ピクセルの全無順序ペアを作る |
+| `beam_vertex_cut_enabled` | false | 同じrun・epoch・trigの散乱点が保存済みビーム直線から指定距離以内かを選別。ON時の頂点なしは除外 |
+| `beam_max_distance_mm` | 10 | 直線との最短3D距離の上限[mm]。XYの差だけではない |
+| `common_pairs_only` | false | trueならHG/LG両方で有効な同一rawヒットペアに揃える。方位角は各gainで別計算 |
+| `pair_weighting` | per_event | 同一イベントの採用ペアに重みを等分し総和1。per_pairなら各ペア1票 |
+| `beam_direction_source` | fitted_line | 方位角を定義する軸の向きを保存fitから得る。configuredなら`beam_direction`を使う |
+| `min_pair_distance_mm` | 0 | ピクセル間の最小距離[mm]。ビームに垂直な投影長0の組は常に除外 |
+| `phi_bins` | 18 | 0〜180度の分布のビン数 |
+| `max_files_per_board` | 0 | 0は全完成HA raw、正値は試験用のボードごとのファイル制限 |
+| `include_tmp` | false | trueならHAの`.dat.tmp`も対象にする |
+
+`inputs.polarization_vertices` は既定で `vertices/all.csv`。Z≤15 mmのイベント除外を暗黙に追加していない。
+Z側条件も必要なら、その入力を `vertices/z0veto.csv` へ変更する。
+`inputs.polarization_beam_axis` は他コードで求めた `beam_axis/axis_z0veto.json`。
+方位角用のビーム方向と距離条件は別で、configuredで方向を指定しても、距離選別には保存された直線を使う。
+ビーム条件OFFかつconfiguredの場合は保存軸や散乱点ファイルを読む必要はない。
+rawの3ヒットから無効ピクセルを落として2個になっても、raw2条件ONでは採用しない。
+
+```bash
+# 同じJSONでHG版とLG版を同時作成する（初回はHA rawを読む）。
+/usr/bin/python3 ETCC_cal/pixel_polarization.py --config ETCC_cal/config/20261124_run06_07.json
+
+# 重心付きrawヒットNPZを再利用して条件を切り替える（SSD不要）。
+/usr/bin/python3 ETCC_cal/pixel_polarization.py --from-cache
+
+# ビーム距離10 mmとraw2条件を有効にした別名出力の設定例。
+/usr/bin/python3 ETCC_cal/pixel_polarization.py \
+  --config ETCC_cal/config/20261124_run06_07_polarization_beam10.json --from-cache
+
+# CLIでも独立に上書きできる。出力を残す場合はJSON側で別のprefixを指定する。
+# --beam-cut / --no-beam-cut
+# --require-two-hits / --no-require-two-hits
+```
+
+run06・07の完成HA rawによる実行結果:
+
+| 条件 | HGピクセルペア | LGピクセルペア |
+| --- | ---: | ---: |
+| raw2=true、ビーム条件OFF | 145,233 | 253,355 |
+| raw2=true、ビーム直線から10 mm以内 | 29,599 | 50,015 |
+
+- [HG版](output/20261124_run06_07/polarization/pixel_hg.png) / [LG版](output/20261124_run06_07/polarization/pixel_lg.png)
+- [ビーム条件ON・HG版](output/20261124_run06_07/polarization/pixel_beam10_hg.png) / [LG版](output/20261124_run06_07/polarization/pixel_beam10_lg.png)
+- [HGピクセル付きCSV](output/20261124_run06_07/polarization/pixel_hg_pairs.csv) / [LGピクセル付きCSV](output/20261124_run06_07/polarization/pixel_lg_pairs.csv)
+- [両gainの集計](output/20261124_run06_07/polarization/pixel_comparison.json)
+
+件数差には対象gainの飽和・8×8範囲外・位置による投影長0の違いが含まれる。同じイベントでの比較には`common_pairs_only=true`を使う。
+変調fitはアクセプタンス未補正の生の方位角分布へのfitで、得たmuを較正済み偏光度とは解釈しない。実際に単純なcos2phiに乗らない大きな構造もある。
+多重ヒットの全ペアは互いに相関する。sumw2は表示用の誤差で、そのペア間共分散を含めた偏光測定の最終誤差ではない。
+
+実装検証では、人工イベントのraw3→有効2の誤採用防止、傾いた直線との距離、頂点なし、切替の独立性、重み、投影長0を確認した。
+実run06キャッシュでもraw2条件OFF・ビーム条件ON・共通ペアONを検証し、多重ヒットの採用とイベント総重み1を確認した。
+
 ## 再実行
 
 以下はリポジトリ直下で実行する。新たな依存インストールは不要。
@@ -289,7 +357,18 @@ HG用較正のLGへの流用は暫定であり、HGとLGの位置応答が同じ
 /usr/bin/python3 ETCC_cal/track_sum.py --rebuild-veto
 
 # 保存した全頂点へイベント単位の除外を適用し、分母と残存率を集計する。
+# シンチ（HA）のヒットフラグも数える。初回だけHA rawのヘッダを読み、selection/ha_hit_flags_<run>.npz に保存する。
+# rawが変わったときは --rebuild-ha で読み直す。
 /usr/bin/python3 ETCC_cal/select_vertices.py
+
+# summary.json の scintillator:
+#   ヒット = HAフレームのヘッダのDataCountのビット（データのあるch）。HG・peak_id・時刻のカットはしない。
+#   TPCとは (epoch, trig) で対応づける。TPCのイベントは epoch 0、trig 1..all_events。
+#   events_with_hit_*: HAヒットが1個以上あるイベント数（all: 全イベント、passing: Z側除外の通過、vertex: 通過して頂点もある）と、その割合 [%]。
+#   hits_*: ヒットフラグの総数。multiplicity_*: 1イベントのヒット数の分布（HAに記録が無いイベントは0）。
+
+# 除外の前後のヒット数の分布を円グラフとヒストグラムで描く（selection/のキャッシュだけを使う。SSD不要）。
+/usr/bin/python3 ETCC_cal/plot_scint_hits.py
 
 # 局所ピーク軸をfitし、全体図と局所表示を両方保存する（SSD不要）。
 /usr/bin/python3 ETCC_cal/beam_axis.py

@@ -15,8 +15,10 @@ SSD・NASなどの入力先、対象ラン、較正値、保存先を指定す�
 
 まず `data_root`（`calltt/`・`killua/` の親）、`runs`、`result_dir` を確認する。
 較正や入力を変えた場合、除外リストを再作成するには `track_sum.py --rebuild-veto --config ...` を使う。
-6本（`track_sum.py`、`select_vertices.py`、`beam_axis.py`、`plot_vertices.py`、`plot_saved_event.py`、`plot_scintillator.py`）とも、`--config` を省略すると `config/20261124_run06_07.json` を読む。
+run06・07用コード（`track_sum.py`、`select_vertices.py`、`beam_axis.py`、`plot_vertices.py`、`plot_saved_event.py`、`plot_scintillator.py`、`reconstruct_ha_lg.py`、`pixel_polarization.py`）とも、`--config` を省略すると `config/20261124_run06_07.json` を読む。
 `inputs.vertices_all` が全頂点CSV、`outputs.vertices_selected` が選別後の頂点CSV。`outputs` で図・集計・fitの出力先も設定する。
 `beam_axis.py` と `plot_vertices.py` の `--input`・`--out` はJSONより優先する任意の上書き。
 
 `20261124_run00_07.json` は、全ランの選別なし飛跡積算を行う `track_runs.py` 用。入力先と追加走査ラン、run06・07の保存済み積算、カラーの百分位、全出力先を設定できる。
+
+`pixel_polarization.py` も同じrun06・07用JSONを使う。HG/LG両版を同時に作り、`polarization`でraw2条件・散乱点のビーム直線距離条件・共通ペア・重みを切り替える。`20261124_run06_07_polarization_beam10.json` は距離10 mm選別をONにして別名保存する例。

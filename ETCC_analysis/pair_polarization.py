@@ -203,11 +203,13 @@ def collect_files(inputs, include_tmp=False, max_files=0):
     return boards
 
 
-def read_hits(boards):
+def read_hits(boards, include_centroids=False):
     """全ボードのヒット（DataCount の立った ch）: board, ch（ADC 番号）, trig, epoch, event, hg, lg, peak_id, satu_h, satu_l
     event = epoch * 2^32 + trig。trig がボードの中で戻ったら epoch を 1 つ進める"""
 
     cols = {k: [] for k in ("board", "ch", "trig", "epoch", "hg", "lg", "peak_id", "satu_h", "satu_l")}
+    if include_centroids:  # ピクセル解析を依頼した場合だけ4種類の重心も保存する。
+        cols.update({k: [] for k in ("x_hg", "y_hg", "x_lg", "y_lg")})  # 既存のブロック中心解析の既定動作は変えない。
     n_frames, n_resets = {}, {}
 
     for board, files in boards.items():
@@ -243,6 +245,9 @@ def read_hits(boards):
             cols["peak_id"].append(peak_id[ev, ch])
             cols["satu_h"].append(satu_h[ev, ch])
             cols["satu_l"].append(satu_l[ev, ch])
+            if include_centroids:  # HG版とLG版を同じrawヒットから比較できるようにする。
+                for name, value in (("x_hg", x_hg), ("y_hg", y_hg), ("x_lg", x_lg), ("y_lg", y_lg)):  # デコード済みの重心を使う。
+                    cols[name].append(value[ev, ch])  # rawヒットフラグが立ったチャンネルだけを保存する。
             print(f"ha{board:02d} {os.path.basename(path)}: {n} frames, {len(ev)} hits ({time.time() - t0:.1f} s)", flush=True)
         if n_resets[board]:
             print(f"[WARN] ha{board:02d}: trig が {n_resets[board]} 回戻った（epoch で分けて組にする）")
