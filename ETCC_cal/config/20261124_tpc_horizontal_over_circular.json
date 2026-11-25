@@ -1,0 +1,24 @@
+{
+  "_doc": {
+    "horizontal_histogram": "水平run00〜07のstage04完成配列。raw1/2×HG/LGの順はcutflowのbranchesを使う。",
+    "circular_histogram": "円run08〜12の同じstage04完成配列。円側の完了後に実行する。",
+    "horizontal_cutflow": "水平側の採用イベント数と4条件の順序。",
+    "circular_cutflow": "円側の採用イベント数と4条件の順序。",
+    "output_dir": "stage04限定のTPC水平／円比の保存先。シンチ比較と分ける。",
+    "minimum_circular_counts": "円の表示ビン件数がこれ未満なら割らない。1は0だけを除く。",
+    "ratio_color_limits": "規格化比のカラー範囲。0〜2で1付近を緑にする。表示外もNPZには実値を保存。",
+    "ratio_colormap": "採用済みのTA風jet配色。",
+    "beam_marker_alpha": "ビーム星印の不透明度。",
+    "normalization": "各投影の総数で独立に規格化した形状比。XZ/YZのstrip-clock数とXYの同時組合せ数を混ぜない。曝露時間・ビーム量の規格化ではない。"
+  },
+  "_units": {"minimum_circular_counts": "counts per displayed bin", "ratio_color_limits": "dimensionless", "beam_marker_alpha": "dimensionless"},
+  "horizontal_histogram": "ETCC_cal/output/20261124_run00_07/shared/stage04_tracks/all_runs.npz",
+  "circular_histogram": "ETCC_cal/output/20261124_run08_12_circular/shared/stage04_tracks/all_runs.npz",
+  "horizontal_cutflow": "ETCC_cal/output/20261124_run00_07/stage04_track_cutflow.json",
+  "circular_cutflow": "ETCC_cal/output/20261124_run08_12_circular/stage04_track_cutflow.json",
+  "output_dir": "ETCC_cal/output/20261124_horizontal_vs_circular/stage04_tpc_ratio",
+  "minimum_circular_counts": 1,
+  "ratio_color_limits": [0, 2],
+  "ratio_colormap": "jet",
+  "beam_marker_alpha": 0.45
+}

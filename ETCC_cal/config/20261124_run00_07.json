@@ -19,7 +19,8 @@
     },
     "runs_to_scan": "全データ積算で新規走査するrun00〜05。run06・07はinputs.run06_07_track_histogramのカット前積算を足す。",
     "color_percentiles": "空ビンを除く表示ビンの下限・上限の百分位。カラースケールだけを変更し、ヒット数・イベントは選別しない。",
-    "include_tmp": "true: 完成rawに加え末尾.raw.tmpの有効フレームも回収。完成rawとの重複は除く。不完全な末尾フレームはデコーダで落とす。"
+    "include_tmp": "true: 完成rawに加え末尾.raw.tmpの有効フレームも回収。完成rawとの重複は除く。不完全な末尾フレームはデコーダで落とす。",
+    "output_groups": "with_z0_cut: Z<=15 mmのraw TPCヒットを含むイベントを除外（個別候補は通過確認済み）。without_z0_cut: このイベント除外なし。comparison: 前後比較。shared: 両方が入る積算配列や共通キャッシュ。ビーム距離選別はZ側除外とは独立。"
   },
   "_units": {
     "pitch_strip": "mm",
@@ -51,13 +52,13 @@
   "z_gem": 5.0,
   "z_veto": 15.0,
   "inputs": {
-    "run06_07_track_histogram": "ETCC_cal/output/20261124_run06_07/tracks/track_sum.npz"
+    "run06_07_track_histogram": "ETCC_cal/output/20261124_run06_07/shared/tracks/track_sum.npz"
   },
   "outputs": {
-    "run_cache_dir": "ETCC_cal/output/20261124_run00_07/runs",
-    "combined_histogram": "ETCC_cal/output/20261124_run00_07/tracks/all_runs.npz",
-    "combined_metadata": "ETCC_cal/output/20261124_run00_07/tracks/all_runs.json",
-    "combined_figure_prefix": "ETCC_cal/output/20261124_run00_07/tracks/all_runs"
+    "run_cache_dir": "ETCC_cal/output/20261124_run00_07/without_z0_cut/runs",
+    "combined_histogram": "ETCC_cal/output/20261124_run00_07/without_z0_cut/tracks/all_runs.npz",
+    "combined_metadata": "ETCC_cal/output/20261124_run00_07/without_z0_cut/tracks/all_runs.json",
+    "combined_figure_prefix": "ETCC_cal/output/20261124_run00_07/without_z0_cut/tracks/all_runs"
   },
   "runs_to_scan": [
     "20261124_run00",

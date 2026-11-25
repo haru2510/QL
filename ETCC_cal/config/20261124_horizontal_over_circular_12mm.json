@@ -1,0 +1,38 @@
+{
+  "_doc": {
+    "horizontal_config": "水平偏光run00〜07の元解析設定。カット一致とビーム印を確認する。",
+    "circular_config": "円偏光run08〜12の元解析設定。",
+    "horizontal_dir": "stage04のraw2品質選別後の水平マップ。飽和などを除いた両ピクセルを使う。",
+    "circular_dir": "同じ最終stageの円偏光マップ。",
+    "output_dir": "水平／円の比較図・元件数付きCSV・集計の保存先。",
+    "minimum_circular_counts": "円側の投影ビン件数がこれ未満なら比を未定義として灰色にする。1は分母0だけを除く。",
+    "ratio_color_limits": "比の表示下限・上限。1を中心色にする。範囲外もCSVは実値で、色バーの両端で表示範囲超過を示す。",
+    "colormap": "比と元分布のカラーマップ。turboは最大値が暗い赤。",
+    "beam_marker_alpha": "ビーム星印の不透明度。0は透明、1は不透明。",
+    "ratio_colormap": "比は1を白にし、水平過剰は赤、水平不足は青の発散色で示す。元マップのcolormapとは独立。",
+    "projection_bin_mm": "0は元の投影ピクセル位置。正値では指定幅の共通格子へ水平・円の件数を別々に合算してから比を取る。",
+    "ratio_marker_size": "比の表示点面積。粗い格子の図で見やすくする表示設定。"
+  },
+  "_units": {
+    "minimum_circular_counts": "hit uses / projected bin",
+    "ratio_color_limits": "dimensionless",
+    "beam_marker_alpha": "dimensionless",
+    "projection_bin_mm": "mm",
+    "ratio_marker_size": "pt^2"
+  },
+  "horizontal_config": "ETCC_cal/config/20261124_run00_07_stages.json",
+  "circular_config": "ETCC_cal/config/20261124_run08_12_circular.json",
+  "horizontal_dir": "ETCC_cal/output/20261124_run00_07/with_z0_cut/stages/04_two_hits_quality",
+  "circular_dir": "ETCC_cal/output/20261124_run08_12_circular/with_z0_cut/stages/04_two_hits_quality",
+  "output_dir": "ETCC_cal/output/20261124_horizontal_vs_circular/double_hit_quality/binned_12mm",
+  "minimum_circular_counts": 1,
+  "ratio_color_limits": [
+    0.5,
+    1.5
+  ],
+  "colormap": "turbo",
+  "beam_marker_alpha": 0.45,
+  "ratio_colormap": "RdBu_r",
+  "projection_bin_mm": 12,
+  "ratio_marker_size": 64
+}

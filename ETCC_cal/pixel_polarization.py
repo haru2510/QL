@@ -13,6 +13,7 @@ import matplotlib  # ファイル出力用の描画環境を設定する。
 matplotlib.use("Agg")  # GUIを開かない。
 import matplotlib.pyplot as plt  # HG/LG別の分布を描く。
 from settings import DEFAULT_CONFIG, REPO, load_config, repo_path  # 共通外部JSONを使う。
+from plot_hit_pixel_maps import draw_pixel_map, beam_reference  # 採用ペアのピクセル位置を3投影でも描く。
 sys.path.insert(0, str(REPO / "ETCC_analysis"))  # 既存のHA処理を検索する。
 import pair_polarization as legacy  # rawヒット読み取りと変調fitを再使用する。
 
@@ -41,27 +42,35 @@ def vertex_table(path):  # 散乱点をラン・イベント番号で照合で�
     return {run: np.array(sorted(values), dtype=float) for run, values in table.items()}  # イベント順に並べ検索に使う。
 
 
-def select_events(events, counts, vertices, point, direction, options):  # ピクセルの有効性に先立ってイベント条件を適用する。
-    selected = np.ones(len(events), dtype=bool)  # まず全rawヒットイベントを候補にする。
-    if options["require_exactly_two_raw_hits"]:  # 単純なフラグがちょうど2個の条件を切り替える。
-        selected &= counts == 2  # HG/LGや配置で落とす前のヒット数で判定する。
-    distances = np.full(len(events), np.nan)  # 散乱点なしは距離未定として扱う。
-    if options["beam_vertex_cut_enabled"]:  # ビームラインとの距離条件を独立に切り替える。
-        valid = np.zeros(len(events), dtype=bool)  # 対応頂点があるイベントだけを通す。
-        if len(vertices):  # このランに散乱点が保存されているか確認する。
-            keys = vertices[:, 0].astype(np.int64)  # イベント番号を整数として扱う。
-            indices = np.searchsorted(keys, events)  # HAイベントの頂点を探す。
-            inside = indices < len(keys)  # 配列外参照を防ぐ。
-            matched = np.flatnonzero(inside)  # 検索範囲内にある候補を取り出す。
-            matched = matched[keys[indices[matched]] == events[matched]]  # 同じイベント番号の頂点だけを使う。
-            delta = vertices[indices[matched], 1:4] - point  # 直線上の基準点から散乱点までのベクトルを得る。
-            distances[matched] = np.linalg.norm(np.cross(delta, direction), axis=1)  # 3次元の直線までの最短距離 [mm]を求める。
-            valid[matched] = distances[matched] <= options["beam_max_distance_mm"]  # 設定した半径以内なら採用する。
-        selected &= valid  # 頂点なしや直線から離れたイベントを除外する。
-    return selected, distances  # 採用イベントと監査用の距離を返す。
+def select_events(events, counts, vertices, point, direction, options, veto_events=None, return_cutflow=False):  # ビーム軸→Z側→rawヒット数の順に選別する。
+    selected = np.ones(len(events), dtype=bool)  # rawヒットがある全イベントから始める。
+    flow = {"initial_events": len(events)}  # カット前の分母を保存する。
+    distances = np.full(len(events), np.nan)  # 頂点なしの距離は未定にする。
+    if options["beam_vertex_cut_enabled"]:  # 最初に散乱点とビーム直線の距離を判定する。
+        valid = np.zeros(len(events), dtype=bool)  # 頂点がないイベントは通さない。
+        if len(vertices):  # 同じランの頂点があるか確認する。
+            keys = vertices[:, 0].astype(np.int64)  # 頂点イベント番号を整数にする。
+            indices = np.searchsorted(keys, events)  # 同じトリガーを検索する。
+            matched = np.flatnonzero(indices < len(keys))  # 配列範囲内だけを調べる。
+            matched = matched[keys[indices[matched]] == events[matched]]  # 番号が一致する頂点だけを使う。
+            delta = vertices[indices[matched], 1:4] - point  # ビーム直線上の基準点からの変位を求める。
+            distances[matched] = np.linalg.norm(np.cross(delta, direction), axis=1)  # 直線との最短3D距離を求める。
+            valid[matched] = distances[matched] <= options["beam_max_distance_mm"]  # 許容距離以内なら採用する。
+        selected &= valid  # 第1段の選別を適用する。
+    flow["after_beam_axis"] = int(selected.sum())  # ビーム軸条件だけの残存数を記録する。
+    if options.get("z0_track_veto_enabled", False):  # 第2段としてイベント全体のZ側除外を切り替える。
+        if veto_events is None:  # 除外リストなしでカットしたことにしない。
+            raise ValueError("Z-side veto enabled but no raw-TPC veto list supplied")  # 入力不足を明示する。
+        selected &= ~np.isin(events, veto_events)  # どこかにZ<=15 mmのTPCヒットがあるイベントを除外する。
+    flow["after_z0_track_veto"] = int(selected.sum())  # 第2段後の数を記録する。
+    required = options.get("required_raw_hits", 2 if options["require_exactly_two_raw_hits"] else None)  # 最後にrawヒット数の条件を選ぶ。
+    if required is not None:  # 1/2ヒット条件を必要な場合だけ適用する。
+        selected &= counts == required  # ピクセル無効ヒットを落とす前の数を使う。
+    flow["after_raw_multiplicity"] = int(selected.sum())  # rawヒット数条件後の数を記録する。
+    return (selected, distances, flow) if return_cutflow else (selected, distances)  # 従来の2戻り値にも対応する。
 
 
-def pixel_positions(hits, gain, geometry, calibration_dir):  # 各rawヒットをHGまたはLGのピクセルへ割り当てる。
+def pixel_positions(hits, gain, geometry, calibration_dir, reject_saturation=True):  # 各rawヒットをHGまたはLGのピクセルへ割り当てる。
     size = len(hits["event"])  # rawフラグで数えたヒット数を取得する。
     positions = np.full((size, 3), np.nan)  # 無効な位置をNaNで表す。
     pixels = np.full((size, 2), -1, dtype=np.int16)  # 無効ピクセルを-1で表す。
@@ -80,7 +89,9 @@ def pixel_positions(hits, gain, geometry, calibration_dir):  # 各rawヒット�
         observed = np.array([[float(row["x"]), float(row["y"])] for row in calibration])  # 重心平面のHGピーク位置を読む。
         ideal = np.array([[int(row["n"]), int(row["m"])] for row in calibration])  # 1〜8のピクセル番号を読む。
         warp = RBFInterpolator(observed, ideal, kernel="thin_plate_spline", smoothing=0)  # EricaNextと同じ位置補間を使う。
-        candidates = indices[(hits[gain][indices] > 0) & (hits["satu_h" if gain == "hg" else "satu_l"][indices] == 0)]  # このgainで飽和・非正積分のヒットを除く。
+        candidates = indices[hits[gain][indices] > 0]  # 重心の計算に使える正積分を要求し、求められない位置は呼出側で処理する。
+        if reject_saturation:  # 品質選別後の既定動作ではこのgainの飽和を除く。
+            candidates = candidates[hits["satu_h" if gain == "hg" else "satu_l"][candidates] == 0]  # フラグのみの図では飽和を理由に位置推定を止めない。
         centroid = np.column_stack((hits["x_" + gain][candidates], hits["y_" + gain][candidates]))  # 指定gainの重心を得る。
         finite = np.all(np.isfinite(centroid), axis=1)  # NaN重心を較正へ入れない。
         candidates, centroid = candidates[finite], centroid[finite]  # 有限な重心だけに絞る。
@@ -196,7 +207,8 @@ def main():  # 同じrawからHG版とLG版を作る。
             order = np.argsort(hits["event"], kind="stable")  # 同じイベントのヒットを並べる。
             hits = {key: value[order] for key, value in hits.items()}  # 全列に同じ並べ替えを適用する。
             events, starts, counts = np.unique(hits["event"], return_index=True, return_counts=True)  # rawヒット数を先に確定する。
-            selected, distances = select_events(events, counts, vertices.get(run, np.zeros((0, 4))), cut_point, cut_direction, options)  # 任意のイベント条件を適用する。
+            veto = np.load(repo_path(config["outputs"]["veto_dir"]) / f"z0_track_veto_{run}.npz")["event"] if options.get("z0_track_veto_enabled", False) else None  # Z側条件を使う場合だけ全TPCヒットの除外集合を読む。
+            selected, distances, cutflow = select_events(events, counts, vertices.get(run, np.zeros((0, 4))), cut_point, cut_direction, options, veto, return_cutflow=True)  # 任意のイベント条件を適用する。
             maps = {gain: pixel_positions(hits, gain, geometry, calibration_dir) for gain in accum}  # 同じヒットをHGとLGで別々にピクセルへ割り当てる。
             products = {}  # 各gainの採用ペアと方位角を用意する。
             for gain, mapped in maps.items():  # ピクセルの有効性はgainごとに判定する。
@@ -221,7 +233,7 @@ def main():  # 同じrawからHG版とLG版を作る。
                     writers[gain].writerow([run, int(hits["epoch"][i]), int(hits["trig"][i]), int(counts[indices[k]]), float(distance) if np.isfinite(distance) else "", *left, *right, float(angle), float(weight)])  # イベントと両ピクセルを1行にまとめる。
                 used = pairs.ravel()  # 採用ペアに使ったシンチ位置を集める。
                 accum[gain]["xy"].append(mapped["position"][used])  # 位置分布を後で描くため保存する。
-                information = {"run": run, "raw_hits": len(order), "raw_hit_events": len(events), "events_after_event_cuts": int(selected.sum()), "valid_pixel_hits": int(mapped["valid"].sum()), "pairs": len(pairs), "pair_events": len(np.unique(pair_events)), "weighted_sum": float(weights.sum()), "raw_multiplicity": np.bincount(counts).tolist()}  # 条件ごとの減少を追跡する。
+                information = {"run": run, "raw_hits": len(order), "raw_hit_events": len(events), "events_after_event_cuts": int(selected.sum()), "cutflow": cutflow, "valid_pixel_hits": int(mapped["valid"].sum()), "pairs": len(pairs), "pair_events": len(np.unique(pair_events)), "weighted_sum": float(weights.sum()), "raw_multiplicity": np.bincount(counts).tolist()}  # 条件ごとの減少を追跡する。
                 accum[gain]["runs"].append(information)  # gain別の集計へ残す。
                 print(f"{run} {gain.upper()}: {len(pairs):,} pairs / {information['pair_events']:,} events", flush=True)  # 違いを確認できる進捗を出す。
     centers = (edges[1:] + edges[:-1]) / 2  # fitに使うビン中心を求める。
@@ -242,18 +254,25 @@ def main():  # 同じrawからHG版とLG版を作る。
         points = np.vstack(result["xy"]) if result["xy"] else np.zeros((0, 3))  # 採用ピクセル位置を合算する。
         if len(points):  # ペアがある場合に位置図を描く。
             positions, count = np.unique(points, axis=0, return_counts=True)  # 同じピクセルの出現数を数える。
-            image = axes[1].scatter(positions[:, 0], positions[:, 1], c=count, s=12, marker="s", cmap="viridis")  # ブロック中心でなくピクセル中心を描く。
+            image = axes[1].scatter(positions[:, 0], positions[:, 1], c=count, s=12, marker="s", cmap=config.get("pixel_map", {}).get("colormap", "turbo"))  # ブロック中心でなくピクセル中心を描く。
             fig.colorbar(image, ax=axes[1], label="hit uses in selected pairs")  # ペアへの使用回数であることを示す。
         axes[1].set(xlabel="X [mm]", ylabel="Y [mm]", title=f"{gain.upper()} assigned pixel centres")  # 使用したgainを示す。
+        if config.get("beam_axis_overlay", {}).get("enabled", False):  # 方位角図の中央にも保存ビーム軸の通過点を示す。
+            _, marker, _, _ = beam_reference(config)  # 底面シンチ平面でのビーム位置を得る。
+            axes[1].scatter(marker[0], marker[1], marker="*", s=160, c="magenta", edgecolors="black", linewidths=0.7, alpha=config["beam_axis_overlay"].get("marker_alpha", 0.45), label=f"Beam at Z={marker[2]:.2f} mm", zorder=5)  # 半透明で下の分布を見えるようにする。
+            axes[1].legend(fontsize=7)  # 星印の意味を表示する。
         axes[1].invert_yaxis()  # 既存図と同じ向きにする。
         multiplicity = np.zeros(max([len(row["raw_multiplicity"]) for row in result["runs"]] + [1]))  # 全rawヒット数の分布を用意する。
         for row in result["runs"]:  # ランごとのraw分布を足す。
             multiplicity[:len(row["raw_multiplicity"])] += row["raw_multiplicity"]  # ピクセルで落とす前の数を描く。
         axes[2].bar(np.arange(len(multiplicity)), multiplicity, color="0.4")  # 2ヒット以外も含む全分布を表示する。
         axes[2].set(xlabel="raw HA hit flags / event", ylabel="events", yscale="log", title="Raw multiplicity before pixel cuts")  # 有効ピクセル数と混同させない。
-        fig.suptitle(f"{gain.upper()} pixel polarization; raw2={options['require_exactly_two_raw_hits']}; vertex-line cut={options['beam_vertex_cut_enabled']}; R={options['beam_max_distance_mm']} mm\nHG position calibration; LG version is provisional; weighting={options['pair_weighting']}")  # 条件を図から確認できるようにする。
+        fig.suptitle((config["data_label"] + "\n" if config.get("data_label") else "") + f"{gain.upper()} pixel polarization; raw2={options['require_exactly_two_raw_hits']}; vertex-line cut={options['beam_vertex_cut_enabled']}; z0 veto={options.get('z0_track_veto_enabled', False)}; R={options['beam_max_distance_mm']} mm\nHG position calibration; LG version is provisional; weighting={options['pair_weighting']}")  # 条件を図から確認できるようにする。
         fig.savefig(str(prefix) + f"_{gain}.png", dpi=140)  # gain別に画像を保存する。
         plt.close(fig)  # 描画メモリを解放する。
+        pair_count = sum(row["pairs"] for row in result["runs"])  # 採用ペアの総数を示す。
+        title = f"{gain.upper()}: raw2={options['require_exactly_two_raw_hits']}; {pair_count:,} pairs / {len(points):,} hit uses\nHG position calibration (LG provisional); beam cut={options['beam_vertex_cut_enabled']}; z0 veto={options.get('z0_track_veto_enabled', False)}"  # 2点ずつ積算することを明記する。
+        draw_pixel_map(points, config, title, "hit uses in selected pairs / projected pixel", Path(str(prefix)+f"_{gain}_pixels.png"))  # 方位角図とは別の3投影を保存する。
     Path(str(prefix) + "_comparison.json").write_text(json.dumps(summary, indent=2) + "\n")  # 両gainの条件・件数・fitを1か所にも保存する。
 
 

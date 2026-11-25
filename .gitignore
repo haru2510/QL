@@ -78,3 +78,8 @@
 /ETCC_cal/config/*
 !/ETCC_cal/config/README.md
 !/ETCC_cal/config/*.json
+
+# ETCC解析の操作・結果確認用Notebook
+!/ETCC_cal/notebooks/
+/ETCC_cal/notebooks/*
+!/ETCC_cal/notebooks/*.ipynb

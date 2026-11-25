@@ -1,0 +1,13 @@
+{
+  "_doc": {
+    "horizontal_prefix": "水平run00〜07のstage04・2ヒット品質選別後の方位角JSON共通名。",
+    "circular_prefix": "円run08〜12の同じ条件の方位角JSON共通名。",
+    "output_dir": "HG/LGの方位角比、元計数CSV、規格化のビン間共分散の保存先。",
+    "ratio_y_limits": "方位角比グラフの縦軸範囲。1は同じ方位角分布。"
+  },
+  "_units": {"ratio_y_limits": "dimensionless"},
+  "horizontal_prefix": "ETCC_cal/output/20261124_run00_07/with_z0_cut/polarization/pixel_beam10_z0",
+  "circular_prefix": "ETCC_cal/output/20261124_run08_12_circular/with_z0_cut/polarization/pixel_beam10_z0",
+  "output_dir": "ETCC_cal/output/20261124_horizontal_vs_circular/stage04_double_hit_quality_azimuth_ratio",
+  "ratio_y_limits": [0.5, 1.5]
+}

@@ -55,7 +55,7 @@ def read_temporary(name, config, completed):  # 完成rawを読み直さず、�
     return histogram, files  # tmpで増えた積算と入力一覧を返す。
 
 
-def draw(hist, config, prefix, label):  # 保存した全ヒットからmm版・クロック版の図を作る。
+def draw(hist, config, prefix, label, selection_label="No event cuts; no vertex selection; no XY selection; no ToT correction", xy_histogram=None):  # 保存した全ヒットからmm版・クロック版の図を作る。
     projections = [hist[i].reshape(96, 8, 256, 4).sum(axis=(1, 3)).T for i in range(2)]  # 8ストリップ・4クロックごとに単純加算する。
     positive = np.concatenate([p[p > 0] for p in projections])  # 空ビンを除いてカラー範囲を見積もる。
     if len(positive) == 0:  # ヒットが全くない入力は描かない。
@@ -70,13 +70,23 @@ def draw(hist, config, prefix, label):  # 保存した全ヒットからmm版・
     scales = [("contrast", low, high), ("fullscale", 1.0, max(float(positive.max()), 2))]  # 調整版と下限1の全レンジ版を両方残す。
     for units, y_edges in (("z", z_edges), ("clock", clocks)):  # 較正に依存しないクロック表示も必ず作る。
         for mode, vmin, vmax in scales:  # カラースケールの違いだけを切り替える。
-            fig, axes = plt.subplots(1, 2, figsize=(12, 7), constrained_layout=True)  # X投影とY投影を横に並べる。
-            for i, ax in enumerate(axes):  # 同一スケールで両投影を描く。
+            fig, axes = plt.subplots(1, 3 if xy_histogram is not None else 2, figsize=(18 if xy_histogram is not None else 12, 7), constrained_layout=True)  # X投影とY投影を横に並べる。
+            for i, ax in enumerate(axes[:2]):  # 同一スケールで両投影を描く。
                 image = ax.pcolormesh(x_edges, y_edges, np.ma.masked_less(projections[i], 1), cmap="turbo", norm=LogNorm(vmin=vmin, vmax=vmax))  # 空ビンはマスクし、データ値は変更しない。
                 fig.colorbar(image, ax=ax, label="raw strip-clock hits / bin", extend="both")  # 色範囲の外の値があることも示す。
                 ax.set(xlabel=("X" if i == 0 else "Y") + " [mm]", ylabel="Z [mm] (down)" if units == "z" else "raw clock", title=("XZ" if i == 0 else "YZ") if units == "z" else ("X-clock" if i == 0 else "Y-clock"))  # 表示量と単位を明記する。
                 ax.invert_yaxis()  # Zまたはクロックが増える方向を下向きにする。
-            fig.suptitle(f"{label}: all recorded raw TPC hits\nNo event veto, vertex / XY / HA selection or ToT correction; {mode}: {vmin:.3g} .. {vmax:.3g}")  # 何も選別していないことと色範囲を示す。
+            if xy_histogram is not None:  # 3D同時ヒットから作ったXYを既存のXZ/YZの横に並べる。
+                xy_positive = xy_histogram[xy_histogram > 0]  # 空ビンを除いてXY用の色範囲を計算する。
+                xy_low, xy_high = np.percentile(xy_positive, percentiles) if len(xy_positive) else (1,2)  # XYZの組合せ数はstripヒット数と分けて表示する。
+                xy_low = max(float(xy_low), 1) if mode == "contrast" else 1.0  # 対数下限を正にする。
+                xy_high = max(float(xy_high) if mode == "contrast" else float(xy_positive.max()) if len(xy_positive) else 2, xy_low*1.01)  # XY専用の色上限を決める。
+                xy_image = axes[2].pcolormesh(x_edges, x_edges, np.ma.masked_less(xy_histogram.T,1), cmap="turbo", norm=LogNorm(vmin=xy_low, vmax=xy_high))  # 同クロックのX×Y組合せをXYへ投影する。
+                fig.colorbar(xy_image, ax=axes[2], label="same-clock X-Y combinations / bin", extend="both")  # raw stripヒット数とは単位を区別する。
+                axes[2].set(xlabel="X [mm]", ylabel="Y [mm]", title="XY after 3D coincidence (same uPIC, same clock)")  # コインシデンス条件を図中に示す。
+                axes[2].invert_yaxis()  # シンチ図と同じくYの正方向を下へ向ける。
+                axes[2].set_aspect("equal", adjustable="box")  # XYの距離スケールを揃える。
+            fig.suptitle(f"{label}: raw TPC hits\n{selection_label}; {mode}: {vmin:.3g} .. {vmax:.3g}")  # 何も選別していないことと色範囲を示す。
             destination = prefix.with_name(prefix.name + f"_{units}_{mode}.png")  # mm/クロックとカラー方式をファイル名で区別する。
             fig.savefig(destination, dpi=150)  # SSDなしでも再利用できる図を保存する。
             plt.close(fig)  # 次の描画へメモリを残さない。
