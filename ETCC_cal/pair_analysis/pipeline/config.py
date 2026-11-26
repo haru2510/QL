@@ -99,6 +99,10 @@ class Pipeline:
         for name, cuts in self.cut_sets.items():
             if cuts["beam_radius_mm"] > self.scan["beam_radius_mm"]:
                 raise ValueError(f"cut set {name}: beam_radius_mm {cuts['beam_radius_mm']} > scan.beam_radius_mm {self.scan['beam_radius_mm']}")
+        overview = self.analysis.get("overview", {})
+        for name in overview.get("samples", []) + ([overview["reference"]] if "reference" in overview else []):
+            if name not in self.samples:
+                raise ValueError(f"analysis.overview: unknown sample {name}")
         for comparison in self.comparisons:
             for key in ("numerator", "denominator"):
                 if comparison[key] not in self.samples:

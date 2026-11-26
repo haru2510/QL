@@ -12,7 +12,10 @@
   - θ >= θmin ごとに φ（0〜360°）のヒストグラムの比を A [1 + μ cos 2(φ − φ0)] で fit（Δχ² は2自由度）。
 
 アクセプタンス（検出器の形）は割り算で消す。分母には偏光の無い（円偏光の）データを使うのが基本。
-出力: stage4_modulation/<cut_set>/<comparison>/{pair.png, pair.json, pair_curve.png, pair_curve.json, single_track.png, single_track.json}, summary.md, summary.json
+全体図（analysis.overview）: 複数のサンプルを1枚に重ね、基準のサンプルに対する比を描く（DD だけで fit）。
+
+出力: stage4_modulation/<cut_set>/overview.png, overview.json（全体図）
+      stage4_modulation/<cut_set>/<comparison>/{pair.png, pair.json, pair_curve.png, pair_curve.json, single_track.png, single_track.json}, summary.md, summary.json
 """
 import json
 
@@ -117,24 +120,34 @@ def mean_cos2(lo_deg, hi_deg):
     return np.where(width > 1e-9, averaged, np.cos(2 * lo))
 
 
+def pair_points(d, bins):
+    """1サンプルの対生成の候補を点に分ける: 0 = DS, 1..bins = DD の ψ のビン, bins+1 = SD。
+
+    戻り値: 各候補の点番号、各候補の cos 2ψ の平均（DS・SD は範囲内で一様と仮定）、ψ の範囲 [lo, hi]。
+    """
+    edges = np.linspace(0, 90, bins + 1)
+    cls = d["cls"]
+    point = np.full(len(cls), -1)
+    point[cls == DS] = 0
+    dd = cls == DD
+    point[dd] = 1 + np.clip(np.digitize(d["psi"][dd], edges) - 1, 0, bins - 1)
+    point[cls == SD] = bins + 1
+    used = point >= 0
+    lo, hi = d["psi_lo"][used], d["psi_hi"][used]
+    return point[used], mean_cos2(lo, hi), np.column_stack([lo, hi])
+
+
 def pair_curve_result(data, labels, bins):
     """DS・DD（ψ のビン）・SD の点を、対生成の候補の総数で規格化して割り、A [1 + μ c_k] で fit する。"""
     edges = np.linspace(0, 90, bins + 1)
     names = ["DS"] + [f"DD {edges[k]:.0f}-{edges[k + 1]:.0f}" for k in range(bins)] + ["SD"]
     counts, cos_sums, ranges = [], np.zeros(bins + 2), [[] for _ in range(bins + 2)]
     for d in data:
-        cls, lo, hi = d["cls"], d["psi_lo"], d["psi_hi"]
-        point = np.full(len(cls), -1)
-        point[cls == DS] = 0
-        dd = cls == DD
-        point[dd] = 1 + np.clip(np.digitize(d["psi"][dd], edges) - 1, 0, bins - 1)
-        point[cls == SD] = bins + 1
-        used = point >= 0
-        counts.append(np.bincount(point[used], minlength=bins + 2))
-        c = mean_cos2(lo[used], hi[used])
-        cos_sums += np.bincount(point[used], weights=c, minlength=bins + 2)
+        point, c, psi_range = pair_points(d, bins)
+        counts.append(np.bincount(point, minlength=bins + 2))
+        cos_sums += np.bincount(point, weights=c, minlength=bins + 2)
         for k in (0, bins + 1):  # DS・SD の ψ の範囲（図の横棒用）
-            ranges[k].append(np.column_stack([lo[point == k], hi[point == k]]))
+            ranges[k].append(psi_range[point == k])
     total = counts[0] + counts[1]
     c_k = cos_sums / np.maximum(total, 1)  # 2つのサンプルを合わせた点ごとの cos 2ψ の平均
     ratio, error, ok = normalized_ratio(counts[0], counts[1])
@@ -193,6 +206,73 @@ def plot_pair_curve(result, plot_data, title, target):
     fig.suptitle(title)
     fig.savefig(target, dpi=120)
     plt.close(fig)
+
+
+def plot_overview(pipeline, cut_name, settings, bins, target):
+    """複数のサンプル（例: 水平・垂直・円偏光）を1枚に重ねる。
+
+    左: 各サンプルの DS・DD（ψ のビン）・SD の割合（対生成の候補の総数に対する %）。
+    右: 基準のサンプル（例: 円偏光）に対する比。DD の点だけで A [1 + μ c_k] を fit した線を引き、DS・SD は参考の点（fit に使わない）。
+    """
+    names = settings["samples"]
+    reference = settings["reference"]
+    data = {n: load_classified(pipeline, cut_name, n) for n in names}
+    points = {n: pair_points(data[n], bins) for n in names}
+    counts = {n: np.bincount(points[n][0], minlength=bins + 2) for n in names}
+    cos_sum = sum(np.bincount(points[n][0], weights=points[n][1], minlength=bins + 2) for n in names)
+    c_k = cos_sum / np.maximum(sum(counts.values()), 1)            # 全サンプルを合わせた点ごとの cos 2ψ の平均
+    psi_eff = np.degrees(0.5 * np.arccos(np.clip(c_k, -1, 1)))     # 図の横軸
+    edges = np.linspace(0, 90, bins + 1)
+    dd = np.zeros(bins + 2, bool)
+    dd[1:bins + 1] = True
+    palette = ["#2a78d6", "#eb6834", "#1baf7a", "#7b4fd0"]
+    others = [n for n in names if n != reference]
+    color = {n: palette[i] for i, n in enumerate(others)} | {reference: "#7a7a7a"}
+    label = {n: pipeline.samples[n]["label"] for n in names}
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 5.6), constrained_layout=True)
+    ax = axes[0]
+    for i, n in enumerate(names):
+        share = 100 * counts[n] / counts[n].sum()
+        error = 100 * np.sqrt(counts[n]) / counts[n].sum()
+        x = psi_eff + (i - (len(names) - 1) / 2) * 0.9  # 重ならないように少しずらす
+        ax.errorbar(x[dd], share[dd], yerr=error[dd], fmt="o", ms=5, color=color[n], label=f"{label[n]}: {int(counts[n].sum()):,} pair candidates")
+        ax.errorbar(x[~dd], share[~dd], yerr=error[~dd], fmt="s", ms=7, color=color[n])
+    for k, text in ((0, "DS"), (bins + 1, "SD")):
+        ax.annotate(text, (psi_eff[k], max(100 * counts[n][k] / counts[n].sum() for n in names)), textcoords="offset points",
+                    xytext=(8, 4), fontsize=10)
+    ax.set(xlabel="ψ [deg]  (0: e+e- plane ∥ X, 90: ∥ Y;  DS, SD: effective ψ)", ylabel="% of pair candidates",
+           title="Pair candidates per point (circle: DD ψ bins, square: DS / SD)", xlim=(-3, 93))
+    ax.legend(fontsize=8, frameon=False)
+
+    ax = axes[1]
+    xx = np.linspace(0, 90, 181)
+    fits = {}
+    for i, n in enumerate(others):
+        ratio, error, ok = normalized_ratio(counts[n], counts[reference])
+        use = ok & dd
+        fit = fit_cos2_mean(c_k[use], ratio[use], error[use])
+        fits[n] = fit
+        x = psi_eff + (i - (len(others) - 1) / 2) * 0.9
+        bin_index = np.flatnonzero(use) - 1
+        xerr = [x[use] - edges[bin_index], edges[bin_index + 1] - x[use]]
+        ax.errorbar(x[use], ratio[use], yerr=error[use], xerr=xerr, fmt="o", ms=5, color=color[n],
+                    label=f"{label[n]} / {label[reference]}: DD fit μ = {fit['mu']:+.3f} ± {fit['mu_err']:.3f} ({fit['significance_sigma']:.1f}σ)")
+        ax.errorbar(x[~dd], ratio[~dd], yerr=error[~dd], fmt="s", ms=7, mfc="white", mec=color[n], ecolor=color[n])
+        ax.plot(xx, fit["A"] * (1 + fit["mu"] * np.cos(2 * np.radians(xx))), color=color[n], lw=1.5, alpha=0.8)
+    for k, text in ((0, "DS"), (bins + 1, "SD")):
+        ax.annotate(text, (psi_eff[k], 1.0), textcoords="offset points", xytext=(-6, -16), fontsize=10, color="0.3")
+    ax.axhline(1, color="0.6", lw=0.8)
+    ax.set(xlabel="ψ [deg]", ylabel=f"ratio to {label[reference]} (each normalized to all pair candidates)",
+           title=f"Modulation relative to {label[reference]} (line: fit to DD points only)", xlim=(-3, 93))
+    ax.legend(fontsize=8, frameon=False)
+    ax.text(0.01, 0.02, "filled circles: DD ψ bins (bar = bin width), used in the fit;  open squares: DS / SD (ψ only bounded), not fitted",
+            transform=ax.transAxes, fontsize=7, color="0.35")
+    fig.suptitle(f"[{cut_name}] pair candidates: " + ", ".join(label[n] for n in names))
+    fig.savefig(target, dpi=120)
+    plt.close(fig)
+    return {"samples": names, "reference": reference, "counts": {n: counts[n].tolist() for n in names},
+            "mean_cos2": c_k.tolist(), "dd_fit": fits}
 
 
 # ---------------------------------------------------------------- 1本の飛跡
@@ -274,6 +354,11 @@ def run(pipeline, cut_set_names=None):
             summary.append(entry)
             print_entry(cut_name, entry)
         folder = pipeline.stage_dir(4, cut_name)
+        overview = pipeline.analysis.get("overview", {"enabled": False})
+        if overview.get("enabled", False):
+            result = plot_overview(pipeline, cut_name, overview, pair_settings["psi_bins"], folder / "overview.png")
+            (folder / "overview.json").write_text(json.dumps(result, indent=1) + "\n")
+            print(f"  saved {folder / 'overview.png'}", flush=True)
         (folder / "summary.json").write_text(json.dumps(summary, indent=1) + "\n")
         (folder / "summary.md").write_text(summary_markdown(cut_name, pipeline.cut_sets[cut_name], summary))
         print(f"  saved {folder / 'summary.md'}", flush=True)

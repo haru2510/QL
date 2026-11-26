@@ -22,7 +22,8 @@
     },
     "analysis": {
       "pair": "対生成の候補（DS・SD・DD）: Q と DD の ψ の比。psi_bins は 0〜90° のビン数。",
-      "single_track": "1本の飛跡（SS）: θ >= theta_min_deg ごとの φ の比。phi_bins は 0〜360° のビン数。"
+      "single_track": "1本の飛跡（SS）: θ >= theta_min_deg ごとの φ の比。phi_bins は 0〜360° のビン数。",
+      "overview": "全体図: samples を1枚に重ね、reference に対する比を描く（DD の点だけで fit、DS・SD は参考の点）。"
     },
     "comparisons": "numerator ÷ denominator の比較。分母は偏光の無い円偏光が基本。同じ偏光同士の比較（系統誤差の確認）も入れる。",
     "event_display": "stage5 のイベントの絵。cut_sets を省略すると全部の組で描く。"
@@ -81,7 +82,8 @@
 
   "analysis": {
     "pair": {"enabled": true, "psi_bins": 9},
-    "single_track": {"enabled": true, "theta_min_deg": [10.0, 20.0, 30.0], "phi_bins": 18}
+    "single_track": {"enabled": true, "theta_min_deg": [10.0, 20.0, 30.0], "phi_bins": 18},
+    "overview": {"enabled": true, "samples": ["horizontal", "vertical", "circular"], "reference": "circular"}
   },
 
   "comparisons": [
