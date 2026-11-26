@@ -20,12 +20,13 @@ XZ（アノード）と YZ（カソード）は別々に読むので、2本の�
 import numpy as np
 
 
-def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False):
+def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False, trace=None):
     """1投影の2本を追う。points は (dz, t) [N, 2]、slopes は出発点の2本の傾き。
 
     戻り値: counts（各枝の {クロック番号: ストリップ数}）、ends（各枝の端の dz）、shared（区別できないクロック番号の集合）。
     クロック番号は dz / mm_per_clock を丸めたもの（XZ と YZ で同じ番号になる）。
     return_paths=True なら、各枝に割り当てた塊の重心の列 [(dz, t), ...] も返す（stage5 の絵用）。
+    trace にリストを渡すと、クロックごとの処理（塊・予測位置・割り当て・重なり）を辞書で追記する（README の図用）。
     """
     window, gap = settings["window_mm"], settings["gap_mm"]
     state = [{"dz": [0.0], "t": [0.0], "slope": float(s), "last": 0.0, "alive": True} for s in slopes]
@@ -38,8 +39,15 @@ def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False):
         centre = np.array([g.mean() for g in groups])
         size = np.array([len(g) for g in groups])
         predicted = [predict(b, dz, settings["refit_length_mm"]) for b in state]
+        record = None
+        if trace is not None:
+            record = {"dz": float(dz), "strips": t, "groups": groups, "predicted": list(predicted),
+                      "alive": [b["alive"] for b in state], "shared": False, "assigned": {}}
+            trace.append(record)
         if abs(predicted[0] - predicted[1]) < settings["shared_mm"]:
             shared.add(clock)
+            if record is not None:
+                record["shared"] = True
             for b in state:  # 重なりの中では終わらせない
                 b["last"] = dz
             continue
@@ -50,6 +58,8 @@ def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False):
             if k not in assigned and g not in taken:
                 assigned[k] = g
                 taken.add(g)
+        if record is not None:
+            record["assigned"] = dict(assigned)
         for k, b in enumerate(state):
             if not b["alive"]:
                 continue
