@@ -12,7 +12,7 @@ XZ（アノード）と YZ（カソード）は別々に読むので、2本の�
 - 出発点は stage2 の2本 fit の直線（散乱点から scan.radius_mm 以内で決めたもの）。
 - 下流へクロックごとに、そのクロックのストリップを「隣り合う塊」（cluster_gap_mm より離れたら別）に分け、
   各枝の予測位置から window_mm 以内の塊を割り当てる。1つの塊は1本の枝にだけ割り当てる（近い組から順に）。
-- 予測位置は、直近 refit_length_mm の塊の重心に直線を当てて延ばす（点が少ないうちは出発点の直線）。
+- 予測位置は、直近 refit_length_mm の塊の中心に直線を当てて延ばす（点が少ないうちは出発点の直線）。
 - 2本の予測位置の差が shared_mm より小さいクロックは、どちらの枝の塊か分からないので、位置を更新せず、
   ストリップ数も記録しない（出発点の直線のまま延ばす）。
 - 枝の塊が gap_mm 続けて無ければ、その枝は終わり（端の Z = 最後に塊があった Z）。
@@ -25,7 +25,7 @@ def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False, 
 
     戻り値: counts（各枝の {クロック番号: ストリップ数}）、ends（各枝の端の dz）、shared（区別できないクロック番号の集合）。
     クロック番号は dz / mm_per_clock を丸めたもの（XZ と YZ で同じ番号になる）。
-    return_paths=True なら、各枝に割り当てた塊の重心の列 [(dz, t), ...] も返す（stage5 の絵用）。
+    return_paths=True なら、各枝に割り当てた塊の中心の列 [(dz, t), ...] も返す（stage5 の絵用）。
     trace にリストを渡すと、クロックごとの処理（塊・予測位置・割り当て・重なり）を辞書で追記する（README の図用）。
     """
     window, gap = settings["window_mm"], settings["gap_mm"]
@@ -78,7 +78,7 @@ def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False, 
 
 
 def predict(branch, dz, refit_length):
-    """直近 refit_length の塊の重心に直線を当てて dz での位置を予測する（5点未満なら出発点の直線）。"""
+    """直近 refit_length の塊の中心に直線を当てて dz での位置を予測する（5点未満なら出発点の直線）。"""
     z, t = np.array(branch["dz"]), np.array(branch["t"])
     near = z >= z[-1] - refit_length
     if near.sum() >= 5:

@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from pipeline.config import Pipeline
+from pipeline.plot_style import use_japanese_font
 from pipeline.stage3_classify import DD, classify, load_sample
 
 
@@ -27,6 +28,7 @@ def main():
     parser.add_argument("--config", type=Path, default=Path(__file__).parent / "config/20261124_25_polarization.json")
     parser.add_argument("--cut-set", default="default")
     args = parser.parse_args()
+    use_japanese_font()
     pipeline = Pipeline(args.config)
     cuts = pipeline.cut_sets[args.cut_set]
     threshold = pipeline.pairing["min_r_difference"]
@@ -54,17 +56,17 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(13, 4.6), constrained_layout=True)
     bins = np.linspace(-1, 1, 41)
     ax = axes[0]
-    ax.hist(better, bins=bins, histtype="step", lw=2, color="#2a78d6", label=f"chosen pairing: mean {better.mean():.2f}")
-    ax.hist(worse, bins=bins, histtype="step", lw=2, color="#7a7a7a", label=f"other pairing: mean {worse.mean():.2f}")
-    ax.set(xlabel="correlation of strips per clock (mean of the two branch pairs)", ylabel="DD events",
-           title=f"Per-clock strip-count correlation, {ok.sum():,} DD")
+    ax.hist(better, bins=bins, histtype="step", lw=2, color="#2a78d6", label=f"選んだ組み方: 平均 {better.mean():.2f}")
+    ax.hist(worse, bins=bins, histtype="step", lw=2, color="#7a7a7a", label=f"選ばなかった組み方: 平均 {worse.mean():.2f}")
+    ax.set(xlabel="クロックごとのストリップ数の相関（2組の平均: r_A または r_B）", ylabel="DD のイベント数",
+           title=f"クロックごとのストリップ数の相関（DD {ok.sum():,} 件）")
     ax.legend(frameon=False, fontsize=9)
     ax = axes[1]
     ax.hist(diff, bins=np.linspace(-2, 2, 41), color="#2a78d6", alpha=0.85)
     ax.axvspan(-threshold, threshold, color="0.85", zorder=0)
-    ax.set(xlabel="r_A − r_B   (> 0: A = a0-b0, a1-b1;  < 0: B = a0-b1, a1-b0)", ylabel="DD events",
-           title=f"Decided by correlation (|r_A − r_B| >= {threshold:g}, outside the grey band): "
-                 f"{decided.sum():,} of {ok.sum():,} ({100 * decided.mean():.0f}%)")
+    ax.set(xlabel="r_A - r_B（正: 組み方 A = a0-b0, a1-b1、負: 組み方 B = a0-b1, a1-b0）", ylabel="DD のイベント数",
+           title=f"相関で決まったもの（|r_A - r_B| >= {threshold:g}、灰色の帯の外）: "
+                 f"{decided.sum():,} / {ok.sum():,} 件（{100 * decided.mean():.0f}%）")
     ax.title.set_fontsize(10)
     target = Path(__file__).parent / "figures/pairing_correlation.png"
     fig.savefig(target, dpi=120)

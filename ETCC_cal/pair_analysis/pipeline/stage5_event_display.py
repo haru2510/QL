@@ -16,6 +16,7 @@ from tpc_projected_pair import projected_hits
 from vertex_sphere import take_local_cells
 
 from .branch_pairing import correlation, decide, follow_branches
+from .plot_style import use_japanese_font
 from .stage3_classify import CLASS_NAMES, DD, DS, SD, classify
 
 BRANCH_COLORS = ("#2a78d6", "#eb6834")
@@ -55,14 +56,14 @@ def draw_projection(ax, hits, axis, single, double, is_two, radius, context):
         for branch in range(2):
             ax.plot(z, double[branch] * z, color=BRANCH_COLORS[branch], lw=1.4, alpha=0.85)
         a0, a1 = np.degrees(np.arctan(double[:2]))
-        label = f"2 lines: {a0:.1f}°, {a1:.1f}° (sep {a1 - a0:.1f}°), Z span {double[4]:.0f}/{double[5]:.0f} mm"
+        label = f"2本: {a0:.1f}°, {a1:.1f}°（差 {a1 - a0:.1f}°）、Z 幅 {double[4]:.0f}/{double[5]:.0f} mm"
     else:
         if np.isfinite(single[0]):
             ax.plot(z, single[0] * z, color=LINE_COLOR, lw=1.4, alpha=0.85)
-        label = f"1 line: {np.degrees(np.arctan(single[0])):.1f}°, on line {int(single[1])}/{int(single[2])}"
+        label = f"1本: {np.degrees(np.arctan(single[0])):.1f}°、乗った点 {int(single[1])}/{int(single[2])}"
     ax.add_patch(plt.Circle((0, 0), radius, fill=False, ls=":", color="0.5"))
     ax.plot(0, 0, "r*", ms=9)
-    ax.set(xlim=(-5, context), ylim=(-context / 2, context / 2), xlabel="Z − Z_vertex [mm]", ylabel=f"{name} − {name}_vertex [mm]")
+    ax.set(xlim=(-5, context), ylim=(-context / 2, context / 2), xlabel="Z - Z_散乱点 [mm]", ylabel=f"{name} - {name}_散乱点 [mm]")
     ax.set_aspect("equal")
     ax.set_title(f"{name}Z: {label}", fontsize=8)
 
@@ -73,6 +74,7 @@ def run(pipeline, cut_set_names=None):
         print("== stage5: event display disabled in the config", flush=True)
         return
     print("== stage5: event display", flush=True)
+    use_japanese_font()  # このステージの図は README の説明用なので日本語にする
     dataset, run_name = settings["dataset"], settings["run"]
     radius, context = pipeline.scan["radius_mm"], settings["context_mm"]
     saved = np.load(pipeline.stage_dir(2, dataset) / f"{run_name}.npz")
@@ -100,9 +102,9 @@ def run(pipeline, cut_set_names=None):
                 event = int(saved["event"][i])
                 x, y, z = saved["vertex"][i]
                 extra = f", ψ = {psi[i]:.0f}°" if code == DD else ""
-                axes[r, 0].text(0.01, 0.97, f"{run_name} event {event >> 32}:{event & 0xFFFFFFFF}\nvertex ({x:.1f}, {y:.1f}, {z:.1f}) mm{extra}",
+                axes[r, 0].text(0.01, 0.97, f"{run_name} event {event >> 32}:{event & 0xFFFFFFFF}\n散乱点 ({x:.1f}, {y:.1f}, {z:.1f}) mm{extra}",
                                 transform=axes[r, 0].transAxes, va="top", fontsize=7)
-            fig.suptitle(f"[{cut_name}] {CLASS_NAMES[code]} events, {run_name}: black = strips used (≤ {radius:g} mm), grey = up to {context:g} mm")
+            fig.suptitle(f"[{cut_name}] {CLASS_NAMES[code]} のイベント、{run_name}: 黒 = fit に使ったストリップ（{radius:g} mm 以内）、灰色 = {context:g} mm 以内")
             target = folder / f"{run_name}_{CLASS_NAMES[code]}_{settings['skip']}.png"
             fig.savefig(target, dpi=110)
             plt.close(fig)
@@ -113,7 +115,7 @@ def run(pipeline, cut_set_names=None):
 def draw_pairing(pipeline, cut_name, cuts, saved, run_name, dataset, folder, settings):
     """DD の枝を追った様子と、組み方の決め方（ストリップ数の相関）を描く。
 
-    1行 = 1イベント。左: XZ、中: YZ（灰色の点 = ストリップ、色の線 = 枝に割り当てた塊の重心。決めた組み方で
+    1行 = 1イベント。左: XZ、中: YZ（灰色の点 = ストリップ、色の線 = 枝に割り当てた塊の中心。決めた組み方で
     同じ粒子の XZ と YZ の枝を同じ色にする）。右: クロックごとのストリップ数（実線 = XZ の枝、点線 = YZ の枝）。
     """
     count = settings.get("pairing_count", 0)
@@ -164,9 +166,9 @@ def draw_pairing(pipeline, cut_name, cuts, saved, run_name, dataset, folder, set
                 if len(paths[b]):
                     ax.plot(paths[b][:, 0], paths[b][:, 1], color=color, lw=1.4, label=label)
             ax.plot(0, 0, "r*", ms=9)
-            ax.set(xlabel="Z − Z_vertex [mm]", ylabel=f"{name} − {name}_vertex [mm]", xlim=(-5, context * 0.8))
+            ax.set(xlabel="Z - Z_散乱点 [mm]", ylabel=f"{name} - {name}_散乱点 [mm]", xlim=(-5, context * 0.8))
             ax.legend(fontsize=7, frameon=False, loc="upper left")
-            ax.set_title(f"{name}Z: followed branches (colour = paired)", fontsize=9)
+            ax.set_title(f"{name}Z: 追った枝（同じ色 = 同じ粒子と判定）", fontsize=9)
         ax = axes[row, 2]
         for a in range(2):
             for axis, style in ((0, "-"), (1, "--")):
@@ -177,14 +179,14 @@ def draw_pairing(pipeline, cut_name, cuts, saved, run_name, dataset, folder, set
                     ax.plot(clocks * mm_per_clock, [series[c] for c in clocks], style, color=colors[a], lw=1,
                             label=f"{'a' if axis == 0 else 'b'}{branch}")
         r_a, r_b = np.nanmean([r[0, 0], r[1, 1]]), np.nanmean([r[0, 1], r[1, 0]])
-        chosen = "A (a0-b0, a1-b1)" if pairing == 1 else "B (a0-b1, a1-b0)"
-        ax.set(xlabel="Z − Z_vertex [mm]", ylabel="strips per clock on the branch",
+        chosen = "組み方 A（a0-b0, a1-b1）" if pairing == 1 else "組み方 B（a0-b1, a1-b0）"
+        ax.set(xlabel="Z - Z_散乱点 [mm]", ylabel="その枝の1クロックのストリップ数",
                title=f"r00 {r[0, 0]:.2f}, r11 {r[1, 1]:.2f}, r01 {r[0, 1]:.2f}, r10 {r[1, 0]:.2f}  →  r_A {r_a:.2f}, r_B {r_b:.2f}: {chosen}")
         ax.title.set_fontsize(8)
         ax.legend(fontsize=7, frameon=False, ncol=2)
         event = int(saved["event"][i])
         axes[row, 0].text(0.01, 0.03, f"{run_name} event {event >> 32}:{event & 0xFFFFFFFF}", transform=axes[row, 0].transAxes, fontsize=7)
-    fig.suptitle(f"[{cut_name}] DD branch pairing, {run_name}: solid = XZ branch, dashed = its paired YZ branch (same colour = same particle)")
+    fig.suptitle(f"[{cut_name}] DD の枝の組み方、{run_name}: 実線 = XZ の枝、点線 = それと組んだ YZ の枝（同じ色 = 同じ粒子）")
     target = folder / f"{run_name}_DD_pairing_{settings['skip']}.png"
     fig.savefig(target, dpi=110)
     plt.close(fig)
