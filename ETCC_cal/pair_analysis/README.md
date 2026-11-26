@@ -22,7 +22,7 @@ raw は SSD（`/mnt/d/UVSOR2026_late`）から読む。WSL では D: を drvfs �
 | stage1 散乱点 | 散乱点に Z 側除外の印とビーム軸からの距離を付け、ビーム近くのものを残す | 散乱点 CSV、Z 側除外、ビーム軸 | ランごとの散乱点、件数 `summary.json` | 約30秒 | `scan.beam_radius_mm` を変えたとき（`--rebuild`） |
 | stage2 枝の fit | raw TPC を読み、散乱点ごとに XZ・YZ で直線を1本・2本 fit（カットなし） | stage1、raw TPC | ランごとの fit の結果 | 約1時間（全データ・4並列） | `scan` の値・fit のコードを変えたとき、`z_veto: false` の cut set を足したとき（自動で検出） |
 | stage3 分類 | cut set のカットをかけ、SS・DS・SD・DD に分類。各カットで残る数を表にする | stage1・stage2 | 分類 `<sample>.npz`、`cutflow.md` | 数秒 | カットを変えたとき |
-| stage4 モジュレーション | 比較ごとに、対生成（Q、DS・DD・SD のカーブ、DD だけのカーブ）と1本の飛跡（φ）のモジュレーションと σ | stage3 | 図・JSON、`summary.md` | 数秒 | 比較を変えたとき |
+| stage4 モジュレーション | 比較ごとに、対生成（Q、DD の ψ のカーブ。DS・SD は参照点）と1本の飛跡（φ）のモジュレーションと σ | stage3 | 図・JSON、`summary.md` | 数秒 | 比較を変えたとき |
 | stage5 イベントの絵 | 分類ごとにイベントを描き、目で確かめる | stage2、raw TPC | PNG | 1分ほど | 見たいラン・分類を変えたとき |
 
 ## ファイル
@@ -62,7 +62,7 @@ pair_analysis/
 │   ├── summary.md, summary.json      全比較の結果の表
 │   ├── overview.png, overview.json   全体図（analysis.overview のサンプルを重ね、基準に対する比）
 │   └── <comparison>/pair.png, pair.json            分類の割合・DD の ψ・DD だけのカーブ・Q
-│                    pair_curve.png, pair_curve.json  DS・DD・SD をまとめたモジュレーションカーブ
+│                    pair_curve.png, pair_curve.json  DS・DD・SD の比（fit は DD だけ、DS・SD は参照点）
 │                    single_track.png, single_track.json  1本の飛跡の φ
 └── stage5_event_display/<cut_set>/<run>_<class>_<skip>.png
 ```
@@ -78,16 +78,17 @@ pair_analysis/
 
 ![全体図](figures/overview.png)
 
-**DS・DD・SD のモジュレーションカーブ: 水平 ÷ 円偏光**（`stage4_modulation/default/horizontal_over_circular/pair_curve.png`）
-μ = +0.141 ± 0.023（6.2σ）、χ²/ndf = 11.0/9。左: 各点の割合、右: 比と fit（紫の四角が DS・SD、横棒は ψ の範囲）。
+**モジュレーションカーブ: 水平 ÷ 円偏光**（`stage4_modulation/default/horizontal_over_circular/pair_curve.png`）
+DD の点だけの fit: μ = +0.198 ± 0.044（4.5σ）、χ²/ndf = 3.6/7。左: 各点の割合、右: 比と fit。
+白抜きの紫の四角は DS・SD の参照点（fit に使わない。横棒は ψ のとりうる範囲）。
 
 ![水平 ÷ 円偏光](figures/pair_curve_horizontal_over_circular.png)
 
-**同: 垂直 ÷ 円偏光**: μ = −0.140 ± 0.021（6.7σ）。水平と逆向き。
+**同: 垂直 ÷ 円偏光**: DD の fit で μ = −0.167 ± 0.039（4.2σ）、χ²/ndf = 5.0/7。水平と逆向き。
 
 ![垂直 ÷ 円偏光](figures/pair_curve_vertical_over_circular.png)
 
-**同じ偏光同士（水平 run00-05 ÷ run06-07）**: μ = −0.030 ± 0.035（0.9σ）。平らなら系統誤差は統計誤差より小さい。
+**同じ偏光同士（水平 run00-05 ÷ run06-07）**: DD の fit で μ = +0.031 ± 0.064（0.5σ）。平らなので、系統誤差は統計誤差より小さい。
 
 ![水平同士](figures/pair_curve_null_horizontal.png)
 
@@ -140,9 +141,9 @@ DS・SD の ψ は1つに決まらないので、とりうる範囲 [psi_lo, psi
 - 対生成（3通り。同じ効果を別の方法で見ているので独立ではない）
   - Q = (N_X − N_Y)/(N_X + N_Y)、N_X = DS + DD(ψ<45°)、N_Y = SD + DD(ψ>=45°)。サンプルごとの Q の差 ΔQ とその σ。
     Q 自体には検出器の XZ・YZ の効率の差も入るので、データ同士の差 ΔQ を見る。
-  - DS・DD・SD のカーブ（`pair_curve.png`）: 11 点で A[1 + μ c_k] を fit（下の節）。対生成の候補を全部使う。
-  - DD だけのカーブ（`pair.png`）: DD の ψ のヒストグラムの比を A[1 + μ cos 2ψ] で fit。ψ が決まるイベントだけなので、
-    μ はなまらないがイベントは少ない。
+  - DD の ψ のカーブ（主な結果）: DD の ψ のヒストグラムの比を A[1 + μ cos 2ψ] で fit。`pair.png` は DD の総数で、
+    `pair_curve.png` と全体図は対生成の候補の総数で規格化している（μ はほぼ同じ）。
+  - DS・SD は `pair_curve.png` と全体図に参照点として描くだけで、fit には使わない（下の節）。
   - σ はどれも統計誤差だけ。カーブは平らな線との Δχ²（1自由度）から出す。
 - 1本の飛跡（SS）: θ >= θmin ごとに φ のヒストグラムの比を A[1 + μ cos 2(φ − φ0)] で fit（2自由度）。
 
@@ -156,18 +157,22 @@ DS・SD の ψ は1つに決まらないので、とりうる範囲 [psi_lo, psi
   ψ は 0 から ψ_max = atan(tan(`min_separation_deg`) / |Δx'|)（45° を上限）の間。
 - SD: 同様に ψ は 90° − atan(tan(`min_separation_deg`) / |Δy'|) から 90° の間。
 
-**カーブ**（stage4 の `pair_curve_result`）
+**図**（stage4 の `pair_curve_result`）
 1. 点は DS、DD の ψ の各ビン（`analysis.pair.psi_bins`、既定 9）、SD の 11 点。
 2. 各サンプルで、点ごとの数を対生成の候補の総数（DS + SD + DD）で割り、分子 ÷ 分母の比を取る（アクセプタンスが消える）。
 3. 点ごとに cos 2ψ の平均 c_k を出す。DS・SD は範囲内で ψ が一様と仮定し、イベントごとに
    (sin 2ψ_hi − sin 2ψ_lo) / (2(ψ_hi − ψ_lo)) を出して平均する。DD のビンはビン内の cos 2ψ の平均。2つのサンプルを合わせて計算する。
-4. 比を A[1 + μ c_k] で fit する。μ > 0 なら e+e- 面が X に近いものが分子で多い。
-5. 図の横軸: 点は cos 2ψ_eff = c_k となる ψ_eff に置き、DS・SD の横棒は ψ の範囲（中央値）。
+4. **DD の点だけ**を A[1 + μ c_k] で fit する（主な結果）。μ > 0 なら e+e- 面が X に近いものが分子で多い。
+   DS・SD は参照点で fit に使わない。
+5. 参考として、DS・SD も入れた 11 点の fit を `pair_curve.json` の `fit_all_points_reference` と summary に残す。
+6. 図の横軸: 点は cos 2ψ_eff = c_k となる ψ_eff に置き、DS・SD の横棒は ψ のとりうる範囲（中央値）。
 
-**注意**
-- DS・SD の ψ が範囲内で一様という仮定は近似。範囲の端に寄っていると c_k がずれ、μ が少し変わる。
-- DS・SD は ψ が範囲でしかわからないのでカーブの両端がなまり、μ は DD だけの fit より小さく出る。
-  代わりにイベントが倍近くになるので、σ は大きくなる。
+**DS・SD を fit に使わない理由**
+- DS・SD のモジュレーションは、DD のカーブから予想される値の約 0.65 倍しかない（水平・垂直とも同じ向き）。
+  11 点で fit すると合わない（水平 ÷ 円偏光 χ²/ndf = 11.0/9、垂直 ÷ 円偏光 15.9/9、水平 ÷ 垂直 36.9/9）。
+- 原因の候補: 「1本」と判定された投影が、いつも角度差 6° 未満の2本とは限らない。角度差は 6° 以上でも、
+  各枝の Z 幅や乗った割合のカットで「2本」を落ち、1本の条件を通ったイベントが混ざると、ψ の範囲の見積もりが成り立たない。
+- 未解決（2026-11-26 に後回し）。確かめるには、stage2 の結果で「1本」側の2本 fit を集計する（raw の読み直しは不要）。
 
 ## `etcc_config`（データセットごとの既存の ETCC_cal 設定）
 

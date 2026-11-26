@@ -4,9 +4,10 @@
   - Q = (N_X − N_Y)/(N_X + N_Y)、N_X = DS + DD(ψ < 45°)、N_Y = SD + DD(ψ >= 45°)。サンプルごとに出して差 ΔQ を取る。
   - DD の ψ（0〜90°）のヒストグラムを各サンプルで規格化して割り、A [1 + μ cos 2ψ] で fit する。
     折り返しているので、偏光が X・Y に対して φ0 傾いていると見える μ は μ_true · cos 2φ0（45° では 0）。
-  - DS・DD・SD をまとめたカーブ: DS（ψ ≈ 0° 側）、DD の ψ の各ビン、SD（ψ ≈ 90° 側）の 11 点を、対生成の候補の総数で
-    規格化して割る。DS・SD は ψ が範囲 [psi_lo, psi_hi] でしか決まらないので、範囲内で ψ が一様と仮定して
-    cos 2ψ を平均した c_k を点ごとに出し、A [1 + μ c_k] で fit する（DD のビンは c_k = ビン内の cos 2ψ の平均）。
+  - DS・DD・SD の図（pair_curve）: DS（ψ ≈ 0° 側）、DD の ψ の各ビン、SD（ψ ≈ 90° 側）の 11 点を、対生成の候補の総数で
+    規格化して割る。fit は DD の点だけで A [1 + μ c_k]（c_k = ビン内の cos 2ψ の平均）。DS・SD は参照点で fit に使わない。
+    DS・SD は ψ が範囲 [psi_lo, psi_hi] でしか決まらない。範囲内で ψ が一様と仮定して 11 点全部を fit した値も、
+    参考として JSON（fit_all_points_reference）と summary に残す（DS・SD が DD より小さいモジュレーションを示し、合わない）。
   - 有意度: 平らな線との Δχ²（1自由度）と ΔQ / 誤差。
 1本の飛跡（analysis.single_track、SS のみ）:
   - θ >= θmin ごとに φ（0〜360°）のヒストグラムの比を A [1 + μ cos 2(φ − φ0)] で fit（Δχ² は2自由度）。
@@ -151,7 +152,10 @@ def pair_curve_result(data, labels, bins):
     total = counts[0] + counts[1]
     c_k = cos_sums / np.maximum(total, 1)  # 2つのサンプルを合わせた点ごとの cos 2ψ の平均
     ratio, error, ok = normalized_ratio(counts[0], counts[1])
-    fit = fit_cos2_mean(c_k[ok], ratio[ok], error[ok])
+    dd = np.zeros(bins + 2, bool)
+    dd[1:bins + 1] = True
+    fit = fit_cos2_mean(c_k[ok & dd], ratio[ok & dd], error[ok & dd])          # 主: DD の点だけ
+    fit_all = fit_cos2_mean(c_k[ok], ratio[ok], error[ok])                  # 参考: DS・SD も入れた 11 点
     psi_eff = np.degrees(0.5 * np.arccos(np.clip(c_k, -1, 1)))  # cos 2ψ_eff = c_k となる ψ（図の横軸）
     spans = {}
     for k, name in ((0, "DS"), (bins + 1, "SD")):
@@ -159,7 +163,7 @@ def pair_curve_result(data, labels, bins):
         spans[name] = [float(np.median(both[:, 0])), float(np.median(both[:, 1]))]
     result = {"labels": labels, "points": names, "counts": [c.tolist() for c in counts], "mean_cos2": c_k.tolist(),
               "psi_effective_deg": psi_eff.tolist(), "ratio": ratio.tolist(), "ratio_err": error.tolist(),
-              "median_psi_range_deg": spans, "fit": fit}
+              "median_psi_range_deg": spans, "fit": fit, "fit_all_points_reference": fit_all}
     return result, (psi_eff, counts, ratio, error, ok)
 
 
@@ -191,17 +195,17 @@ def plot_pair_curve(result, plot_data, title, target):
     for k, name in edge_points.items():
         lo, hi = result["median_psi_range_deg"][name]
         ax.errorbar([psi_eff[k]], [ratio[k]], yerr=[error[k]], xerr=[[psi_eff[k] - lo], [hi - psi_eff[k]]], fmt="s", ms=7,
-                    color="#7b4fd0", capsize=3)
+                    mfc="white", mec="#7b4fd0", ecolor="#7b4fd0", capsize=3, label="DS / SD (reference, not fitted)" if k == 0 else None)
         ax.annotate(name, (psi_eff[k], ratio[k]), textcoords="offset points", xytext=(6, 8), fontsize=9, color="#7b4fd0")
     xx = np.linspace(0, 90, 181)
     ax.plot(xx, fit["A"] * (1 + fit["mu"] * np.cos(2 * np.radians(xx))), color="#e34948",
-            label=f"A[1 + μ cos 2ψ]: μ = {fit['mu']:+.3f} ± {fit['mu_err']:.3f} ({fit['significance_sigma']:.1f}σ vs flat)\n"
+            label=f"fit to DD only, A[1 + μ cos 2ψ]: μ = {fit['mu']:+.3f} ± {fit['mu_err']:.3f} ({fit['significance_sigma']:.1f}σ vs flat)\n"
                   f"χ²/ndf = {fit['chi2']:.1f}/{fit['ndf']} (flat: {fit['chi2_flat']:.1f}/{fit['ndf_flat']})")
     ax.axhline(1, color="0.6", lw=0.8)
     ax.set(xlabel="ψ [deg]  (0: e+e- plane ∥ X, 90: ∥ Y)", ylabel="ratio (each normalized to all pair candidates)",
            title=f"{labels[0]} / {labels[1]}", xlim=(-3, 93))
     ax.legend(fontsize=8, frameon=False, loc="upper right")
-    ax.text(0.01, 0.02, "DD: horizontal bar = bin width.  DS / SD: point at the effective ψ, bar = median allowed ψ range (ψ assumed uniform in it)",
+    ax.text(0.01, 0.02, "DD: bar = bin width, used in the fit.  DS / SD: reference only; point at the effective ψ, bar = median allowed ψ range",
             transform=ax.transAxes, fontsize=7, color="0.35")
     fig.suptitle(title)
     fig.savefig(target, dpi=120)
@@ -338,8 +342,10 @@ def run(pipeline, cut_set_names=None):
                 (folder / "pair_curve.json").write_text(json.dumps(curve, indent=1) + "\n")
                 plot_pair_curve(curve, curve_plot, title + "  (pair candidates: DS + DD + SD)", folder / "pair_curve.png")
                 entry["pair"] = {"events": [a["N_X"] + a["N_Y"] for a in result["asymmetry"]],
-                                 "curve_mu": curve["fit"]["mu"], "curve_mu_err": curve["fit"]["mu_err"],
-                                 "curve_sigma": curve["fit"]["significance_sigma"],
+                                 "all_points_mu": curve["fit_all_points_reference"]["mu"],
+                                 "all_points_mu_err": curve["fit_all_points_reference"]["mu_err"],
+                                 "all_points_chi2": curve["fit_all_points_reference"]["chi2"],
+                                 "all_points_ndf": curve["fit_all_points_reference"]["ndf"],
                                  "Q": [a["Q"] for a in result["asymmetry"]], "delta_Q": result["delta_Q"],
                                  "dd_mu": result["dd_psi_fit"]["mu"], "dd_mu_err": result["dd_psi_fit"]["mu_err"],
                                  "dd_sigma": result["dd_psi_fit"]["significance_sigma"]}
@@ -370,7 +376,7 @@ def print_entry(cut_name, entry):
         p = entry["pair"]
         text += (f" pair ΔQ = {p['delta_Q']['value']:+.4f} ± {p['delta_Q']['err']:.4f} ({p['delta_Q']['significance_sigma']:.1f}σ),"
                  f" DD μ = {p['dd_mu']:+.3f} ± {p['dd_mu_err']:.3f} ({p['dd_sigma']:.1f}σ),"
-                 f" DS+DD+SD μ = {p['curve_mu']:+.3f} ± {p['curve_mu_err']:.3f} ({p['curve_sigma']:.1f}σ)")
+                 f" (reference DS+DD+SD μ = {p['all_points_mu']:+.3f}, χ²/ndf = {p['all_points_chi2']:.1f}/{p['all_points_ndf']})")
     if "single_track" in entry:
         s = entry["single_track"]
         text += f" | SS θ>={s['theta_min_deg']:g}: μ = {s['mu']:.3f} ± {s['mu_err']:.3f} at {s['phi0_deg']:.0f}° ({s['sigma']:.1f}σ)"
@@ -379,7 +385,7 @@ def print_entry(cut_name, entry):
 
 def summary_markdown(cut_name, cuts, summary):
     lines = [f"# Modulation summary: {cut_name}", "", "```json", json.dumps(cuts, indent=1), "```", "",
-             "| comparison | pair events | Q (num / den) | ΔQ | DS+DD+SD curve μ | DD-only μ | single-track μ, φ0 |", "|---|---|---|---|---|---|---|"]
+             "| comparison | pair events | Q (num / den) | ΔQ | DD μ (cos 2ψ) | reference: DS+DD+SD μ (χ²/ndf) | single-track μ, φ0 |", "|---|---|---|---|---|---|---|"]
     for e in summary:
         p, s = e.get("pair"), e.get("single_track")
         pair_cells = ["-"] * 5
@@ -387,10 +393,10 @@ def summary_markdown(cut_name, cuts, summary):
             d = p["delta_Q"]
             pair_cells = [f"{p['events'][0]:,} / {p['events'][1]:,}", f"{p['Q'][0]:+.3f} / {p['Q'][1]:+.3f}",
                           f"{d['value']:+.3f} ± {d['err']:.3f} ({d['significance_sigma']:.1f}σ)",
-                          f"{p['curve_mu']:+.3f} ± {p['curve_mu_err']:.3f} ({p['curve_sigma']:.1f}σ)",
-                          f"{p['dd_mu']:+.3f} ± {p['dd_mu_err']:.3f} ({p['dd_sigma']:.1f}σ)"]
+                          f"{p['dd_mu']:+.3f} ± {p['dd_mu_err']:.3f} ({p['dd_sigma']:.1f}σ)",
+                          f"{p['all_points_mu']:+.3f} ± {p['all_points_mu_err']:.3f} ({p['all_points_chi2']:.1f}/{p['all_points_ndf']})"]
         single_cell = (f"θ≥{s['theta_min_deg']:g}°: {s['mu']:.3f} ± {s['mu_err']:.3f}, {s['phi0_deg']:.0f}° ({s['sigma']:.1f}σ)"
                        if s else "-")
         lines.append(f"| {e['comparison']} ({e['numerator']} / {e['denominator']}) | " + " | ".join(pair_cells) + f" | {single_cell} |")
-    lines += ["", "σ: statistical only. Curve μ (DS + DD ψ bins + SD, ψ of DS/SD assumed uniform in its allowed range) and DD-only μ use Δχ² vs flat with 1 dof; single-track uses 2 dof (μ, φ0)."]
+    lines += ["", "σ: statistical only. DD μ: fit to DD ψ bins, Δχ² vs flat with 1 dof (main result). Reference DS+DD+SD μ assumes ψ of DS/SD uniform in its allowed range and does not fit well (DS/SD show smaller modulation). Single-track uses 2 dof (μ, φ0)."]
     return "\n".join(lines) + "\n"
