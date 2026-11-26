@@ -20,11 +20,12 @@ XZ（アノード）と YZ（カソード）は別々に読むので、2本の�
 import numpy as np
 
 
-def follow_branches(points, slopes, settings, mm_per_clock):
+def follow_branches(points, slopes, settings, mm_per_clock, return_paths=False):
     """1投影の2本を追う。points は (dz, t) [N, 2]、slopes は出発点の2本の傾き。
 
     戻り値: counts（各枝の {クロック番号: ストリップ数}）、ends（各枝の端の dz）、shared（区別できないクロック番号の集合）。
     クロック番号は dz / mm_per_clock を丸めたもの（XZ と YZ で同じ番号になる）。
+    return_paths=True なら、各枝に割り当てた塊の重心の列 [(dz, t), ...] も返す（stage5 の絵用）。
     """
     window, gap = settings["window_mm"], settings["gap_mm"]
     state = [{"dz": [0.0], "t": [0.0], "slope": float(s), "last": 0.0, "alive": True} for s in slopes]
@@ -60,6 +61,9 @@ def follow_branches(points, slopes, settings, mm_per_clock):
                 counts[k][clock] = int(size[g])
             elif dz - b["last"] > gap:
                 b["alive"] = False
+    if return_paths:
+        paths = [np.column_stack([b["dz"][1:], b["t"][1:]]) for b in state]
+        return counts, [b["last"] for b in state], shared, paths
     return counts, [b["last"] for b in state], shared
 
 

@@ -1,8 +1,10 @@
 """stage5: 分類ごとに、散乱点まわりの XZ・YZ の raw ストリップと、fit した直線を描く（目で確かめる用）。
 
-event_display の設定: cut_sets（描く cut set）, dataset, run, classes, count（各分類の先頭から何件）, skip, context_mm。
+event_display の設定: cut_sets（描く cut set）, dataset, run, classes, count（各分類の先頭から何件）, skip, context_mm,
+pairing_count（枝の組み方の絵にする DD の件数。0 なら描かない）。
 黒: fit に使った範囲（scan.radius_mm 以内）のストリップ、灰色: context_mm 以内の全ストリップ。
 出力: stage5_event_display/<cut_set>/<run>_<class>.png
+      stage5_event_display/<cut_set>/<run>_DD_pairing_<skip>.png（枝を追った様子と、クロックごとのストリップ数）
 """
 import matplotlib
 matplotlib.use("Agg")
@@ -13,6 +15,7 @@ from stage_coincidence_xy import scan_run
 from tpc_projected_pair import projected_hits
 from vertex_sphere import take_local_cells
 
+from .branch_pairing import correlation, decide, follow_branches
 from .stage3_classify import CLASS_NAMES, DD, DS, SD, classify
 
 BRANCH_COLORS = ("#2a78d6", "#eb6834")
@@ -104,3 +107,85 @@ def run(pipeline, cut_set_names=None):
             fig.savefig(target, dpi=110)
             plt.close(fig)
             print(f"  saved {target}", flush=True)
+        draw_pairing(pipeline, cut_name, cuts, saved, run_name, dataset, folder, settings)
+
+
+def draw_pairing(pipeline, cut_name, cuts, saved, run_name, dataset, folder, settings):
+    """DD の枝を追った様子と、組み方の決め方（ストリップ数の相関）を描く。
+
+    1行 = 1イベント。左: XZ、中: YZ（灰色の点 = ストリップ、色の線 = 枝に割り当てた塊の重心。決めた組み方で
+    同じ粒子の XZ と YZ の枝を同じ色にする）。右: クロックごとのストリップ数（実線 = XZ の枝、点線 = YZ の枝）。
+    """
+    count = settings.get("pairing_count", 0)
+    if count <= 0 or not pipeline.pairing.get("enabled", False):
+        return
+    base = saved["beam_distance"] <= cuts["beam_radius_mm"]
+    if cuts["z_veto"]:
+        base &= ~saved["z_vetoed"]
+    cls, _ = classify(saved["single"], saved["double"], cuts)
+    rows = np.flatnonzero(base & (cls == DD))[settings["skip"]:settings["skip"] + 4 * count]
+    config = pipeline.etcc_config(dataset)
+    mm_per_clock = config["velocity"]
+    context = pipeline.pairing["context_mm"]
+    hits = read_hits(pipeline, dataset, run_name, saved["event"][rows], saved["vertex"][rows], context)
+    drawn = []
+    for k, i in enumerate(rows):  # 相関で組み方が決まったイベントを count 件
+        if k not in hits:
+            continue
+        h = hits[k]
+        follows = [follow_branches(h[h[:, 0] == axis][:, 1:], saved["double"][i, axis, :2], pipeline.pairing, mm_per_clock,
+                                   return_paths=True) for axis in range(2)]
+        excluded = follows[0][2] | follows[1][2]
+        r = np.full((2, 2), np.nan)
+        for a in range(2):
+            for b in range(2):
+                r[a, b] = correlation(follows[0][0][a], follows[1][0][b], excluded, pipeline.pairing["min_clocks"])[0]
+        end = np.array([follows[0][1], follows[1][1]])
+        pairing, method = decide(r, end, pipeline.pairing)
+        if method == "correlation":
+            drawn.append((i, h, follows, r, pairing))
+        if len(drawn) == count:
+            break
+    if not drawn:
+        return
+    colors = ("#2a78d6", "#eb6834")
+    fig, axes = plt.subplots(len(drawn), 3, figsize=(17, 3.6 * len(drawn)), squeeze=False, constrained_layout=True)
+    for row, (i, h, follows, r, pairing) in enumerate(drawn):
+        partner = [0, 1] if pairing == 1 else [1, 0]  # XZ の枝 a に対応する YZ の枝
+        color_y = [colors[partner.index(b)] for b in range(2)]
+        for axis, name in enumerate("XY"):
+            ax = axes[row, axis]
+            p = h[h[:, 0] == axis]
+            ax.scatter(p[:, 1], p[:, 2], s=2, color="#b8b7b2", lw=0)
+            paths = follows[axis][3]
+            for b in range(2):
+                color = colors[b] if axis == 0 else color_y[b]
+                label = f"{'a' if axis == 0 else 'b'}{b}"
+                if len(paths[b]):
+                    ax.plot(paths[b][:, 0], paths[b][:, 1], color=color, lw=1.4, label=label)
+            ax.plot(0, 0, "r*", ms=9)
+            ax.set(xlabel="Z − Z_vertex [mm]", ylabel=f"{name} − {name}_vertex [mm]", xlim=(-5, context * 0.8))
+            ax.legend(fontsize=7, frameon=False, loc="upper left")
+            ax.set_title(f"{name}Z: followed branches (colour = paired)", fontsize=9)
+        ax = axes[row, 2]
+        for a in range(2):
+            for axis, style in ((0, "-"), (1, "--")):
+                branch = a if axis == 0 else partner[a]
+                series = follows[axis][0][branch]
+                clocks = np.array(sorted(series))
+                if len(clocks):
+                    ax.plot(clocks * mm_per_clock, [series[c] for c in clocks], style, color=colors[a], lw=1,
+                            label=f"{'a' if axis == 0 else 'b'}{branch}")
+        r_a, r_b = np.nanmean([r[0, 0], r[1, 1]]), np.nanmean([r[0, 1], r[1, 0]])
+        chosen = "A (a0-b0, a1-b1)" if pairing == 1 else "B (a0-b1, a1-b0)"
+        ax.set(xlabel="Z − Z_vertex [mm]", ylabel="strips per clock on the branch",
+               title=f"r00 {r[0, 0]:.2f}, r11 {r[1, 1]:.2f}, r01 {r[0, 1]:.2f}, r10 {r[1, 0]:.2f}  →  r_A {r_a:.2f}, r_B {r_b:.2f}: {chosen}")
+        ax.title.set_fontsize(8)
+        ax.legend(fontsize=7, frameon=False, ncol=2)
+        event = int(saved["event"][i])
+        axes[row, 0].text(0.01, 0.03, f"{run_name} event {event >> 32}:{event & 0xFFFFFFFF}", transform=axes[row, 0].transAxes, fontsize=7)
+    fig.suptitle(f"[{cut_name}] DD branch pairing, {run_name}: solid = XZ branch, dashed = its paired YZ branch (same colour = same particle)")
+    target = folder / f"{run_name}_DD_pairing_{settings['skip']}.png"
+    fig.savefig(target, dpi=110)
+    plt.close(fig)
+    print(f"  saved {target}", flush=True)

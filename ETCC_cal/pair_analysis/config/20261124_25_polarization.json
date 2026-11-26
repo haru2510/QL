@@ -38,7 +38,7 @@
       "min_end_difference_mm": "（stage3）相関で決まらず、A と B の『端の Z の差の合計』の違いがこれ以上なら端で決める。"
     },
     "comparisons": "numerator ÷ denominator の比較。分母は偏光の無い円偏光が基本。同じ偏光同士の比較（系統誤差の確認）も入れる。",
-    "event_display": "stage5 のイベントの絵。cut_sets を省略すると全部の組で描く。"
+    "event_display": "stage5 のイベントの絵。cut_sets を省略すると全部の組で描く。pairing_count は、枝の組み方の絵にする DD の件数（相関で組み方が決まったもの、0 なら描かない）。"
   },
   "name": "20261124-25 UVSOR 6.6 MeV: horizontal / vertical / 45 deg / circular",
   "output_dir": "ETCC_cal/output/pair_analysis/20261124_25",
@@ -133,6 +133,7 @@
     "classes": ["DD", "DS", "SD", "SS"],
     "count": 6,
     "skip": 0,
-    "context_mm": 100.0
+    "context_mm": 100.0,
+    "pairing_count": 3
   }
 }
