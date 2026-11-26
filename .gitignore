@@ -73,6 +73,10 @@
 /ETCC_cal/param/*
 !/ETCC_cal/param/20261124_run06_07.json
 
+# TPC の飛跡による偏光解析パイプライン（コード・設定・README・代表図。結果は output/ 側で追跡しない）
+!/ETCC_cal/pair_analysis/
+/ETCC_cal/pair_analysis/**/__pycache__/
+
 # 外部入力先・ランを指定するETCC設定
 !/ETCC_cal/config/
 /ETCC_cal/config/*

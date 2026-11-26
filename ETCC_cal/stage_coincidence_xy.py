@@ -56,6 +56,9 @@ def commit_event(occupancy, occupied_bins, bin_counts, popcount, mask, histogram
 
 def frame_stream(paths, tag, allowed_events=None):  # 同じボードのフレームをepoch付きイベント順に供給する。
     previous, epoch, seen = None, 0, set()  # 巻き戻りと重複を管理する。
+    if allowed_events is not None and len(allowed_events)==0:  # 採用イベントのないボード走査は省く。
+        return  # 空のストリームとして終える。
+    maximum = int(np.max(allowed_events)) if allowed_events is not None else None  # epoch付きイベントキーは単調なので最後の採用IDで止められる。
     for path in paths:  # 大量のrawを1ファイルずつ読む。
         buf, triggers, offsets, records = decoder.scan_file(path)  # バッファと有効フレーム位置を読む。
         if not len(triggers):  # 空ファイルは飛ばす。
@@ -71,9 +74,11 @@ def frame_stream(paths, tag, allowed_events=None):  # 同じボードのフレ�
                 seen.add(event)  # 次の重複を除くため記録する。
                 yield event, buf, int(offsets[i]), int(records[i])  # バッファはこのファイルを使い切るまで保持する。
         print(tag,Path(path).name,'coincidence frames read',flush=True)  # 長いuPIC処理の進捗を残す。
+        if maximum is not None and int(events[-1])>=maximum:  # これ以後はepochが増えても採用IDに戻らない。
+            break  # 不要な後続rawファイルを読まない。
 
 
-def scan_run(run, config, selected, raw_histogram=None):  # 同じuPICの最大6ボードをイベントごとに結合する。
+def scan_run(run, config, selected, raw_histogram=None, cylinder=None, cylinder_histogram=None, event_processor=None):  # 同じuPICの最大6ボードをイベントごとに結合する。
     directories = [str(repo_path(config['data_root'])/storage/run) for storage in config['storages']]  # 両storageを読む。
     boards = decoder.collect_boards(directories,0)  # 完成rawだけを使う。
     if not boards:  # 空入力を正常終了にしない。
@@ -114,7 +119,14 @@ def scan_run(run, config, selected, raw_histogram=None):  # 同じuPICの最大6
                 following = next(streams[index],None)  # 同じボードの次イベントを準備する。
                 if following is not None:  # ストリーム終端ならheapへ戻さない。
                     heapq.heappush(heap,(following[0],index,following))  # 次のイベント順に並べる。
-            if commit_event(occupancy,occupied_bins,bin_counts,popcount,mask,histogram):  # 3D同時ヒットを全組合せで積算する。
+            if event_processor is not None:  # 散乱点ごとの局所解析へraw占有を渡す。
+                combinations = event_processor(event,upic,occupancy,occupied_bins,bin_counts)  # 呼出側が使用占有を必ず初期化する。
+            elif cylinder is None:  # 既存の全域XYは従来どおり計算する。
+                combinations = commit_event(occupancy,occupied_bins,bin_counts,popcount,mask,histogram)  # 同クロックの全候補を採用する。
+            else:  # 円柱版は同じ3D候補を選んで3面へ投影する。
+                from cylinder_coincidence import commit_cylinder_event  # 円柱選別の高速ループを読み込む。
+                combinations = commit_cylinder_event(occupancy,occupied_bins,bin_counts,popcount,mask,histogram,cylinder_histogram,cylinder['point'],cylinder['direction'],cylinder['radius_mm'],config['velocity'],config['clock_offset'],config['z_gem'])  # ビン合算より前の実位置で判定する。
+            if combinations:  # 円柱指定時は円柱内候補のあるイベントを数える。
                 coincident_events.add(event)  # 同時ヒットありのイベントを記録する。
         print(f'COMPLETE {run} uPIC{upic} XY coincidence',flush=True)  # uPICごとの完了を残す。
     if selected[0] is None and len(selected)==5:  # stage00〜03の累積条件にだけ包含関係を適用する。

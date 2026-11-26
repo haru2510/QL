@@ -1,0 +1,178 @@
+{
+  "_doc": {
+    "_": "垂直偏光のシンチ2ヒット解析。ビーム軸は20261124 run06・07と共通。",
+    "data_root": "rawがあるSSDの親ディレクトリ。直下のcallttとkilluaを読む。",
+    "storages": "アノードとカソードの保存先。",
+    "runs": "円偏光のrun08〜12。run00〜07と混ぜない。",
+    "result_dir": "解析結果の正規保存先。outputはGit対象外。",
+    "pitch_strip": "ストリップ間隔。現在の積算ビンは0.4 mmを前提。",
+    "velocity": "ドリフト速度。",
+    "clock_offset": "GEM面に対応するクロック。",
+    "z_gem": "GEM面のZ座標。",
+    "z_veto": "このZ以下のrawヒットが1個でもあればイベント全体を除外。XYと高Z側は除外しない。",
+    "inputs": "vertices_all: 全頂点CSV。event_points: 個別候補のTPC投影・シンチ座標JSON。scintillator_counts: 全rawシンチ件数JSON。raw入力はdata_rootとruns。",
+    "outputs": {
+      "veto_dir": "イベント単位のZ側除外NPZを置くフォルダ。",
+      "vertices_selected": "select_vertices.pyが作り、beam_axis.pyとplot_vertices.pyが読む頂点CSV。",
+      "vertex_figure": "追加XY選別なしの頂点投影図。",
+      "selection_summary": "全トリガーを分母にした件数表。",
+      "track_histogram": "全rawヒットの積算配列。plot-onlyもここから読む。",
+      "track_metadata": "raw走査で求める件数・入力一覧。select_vertices.pyもここから読む。",
+      "track_figure": "カット前後の飛跡積算PNG。",
+      "beam_axis_prefix": "fitの保存名。拡張子を付けずに指定し、.json・.png・_local.pngを作る。",
+      "event_figure_prefix": "保存済みイベント点群から作るPNG・HTMLの保存名（拡張子なし）。",
+      "scintillator_figure": "保存済み全rawシンチ件数から作るブロック別分布PNG。",
+      "lg_event_dir": "LG重心とHG位置較正で更新した候補JSONと集計の保存先。",
+      "pixel_polarization_prefix": "HG/LGの方位角図・ピクセル付きペアCSV・集計JSONを保存する共通名。",
+      "polarization_hit_cache_dir": "再選別用のHG/LG重心付き全rawヒットNPZ保存先。",
+      "single_hit_pixel_prefix": "raw1ヒットのHG/LG推定ピクセル図・イベントCSV・ピクセル件数CSV・集計JSONの共通名。"
+    },
+    "lg_position": "reconstruct_ha_lg.py: LG波形の重心をHG用position_haNN.csvに入力してピクセル位置を暫定推定。LGも飽和・LG積分<=0・8x8範囲外はブロック中心へ代用。エネルギー較正には流用しない。",
+    "polarization": {
+      "_": "pixel_polarization.py。HG/LG版を同じrawから作る。両版ともHG位置較正を使い、LGへの流用は暫定。各gainで飽和・非正積分・範囲外はピクセル無効とする。",
+      "require_exactly_two_raw_hits": "true: ピクセル選別前のraw DataCountフラグがちょうど2個。false: 有効ピクセルの全無順序ペア。",
+      "beam_vertex_cut_enabled": "true: 同じrun・epoch・trigの推定散乱点と保存済みビーム直線の最短3D距離で選別。頂点なしは除外。false: 頂点CSVを使わず通す。",
+      "beam_max_distance_mm": "ビーム直線から散乱点までの最大距離。",
+      "common_pairs_only": "true: HG/LG両方で有効な同一rawペアに揃える。false: 各gainで独立に採用する。",
+      "pair_weighting": "per_event: 採用ペアをイベント内で等分し総重み1。per_pair: 各ペア1票。",
+      "beam_direction_source": "fitted_line: 保存軸の向きで方位角を定義。configured: beam_directionを使う。距離選別自体は常に保存されたfit直線。",
+      "beam_direction": "任意指定するビーム方向ベクトル。",
+      "reference_axis": "方位角0の基準軸。ビームに垂直な面へ射影して使う。",
+      "min_pair_distance_mm": "2ピクセル間の最小距離。ビームに垂直な投影長0は除外。",
+      "phi_bins": "0〜180度の方位角ビン数。",
+      "max_files_per_board": "0: 全完成ファイル。正値: ボードごとの試験用ファイル上限。試験と全データのキャッシュを混同しない。",
+      "include_tmp": "true: .dat.tmpも読み取り対象にする。",
+      "z0_track_veto_enabled": "true: ビーム軸条件の後、Z<=15 mmのraw TPCヒットを含むイベントを除外。その後にrawヒット数を選別。"
+    },
+    "single_hit_pixels": {
+      "_": "single_hit_pixels.py。ピクセルを落とす前のrawフラグがちょうど1個のイベントを選ぶ。既定ではTPC条件・Z側条件・HG/peak_idカットなし。",
+      "beam_vertex_cut_enabled": "true: 同じトリガーの散乱点と保存ビーム直線の距離で選別。false: 散乱点を要求しない。",
+      "beam_max_distance_mm": "ビーム直線との最大3D距離。",
+      "common_events_only": "true: HGとLGの両方でピクセルが有効な同じイベントに揃える。false: 各gainで独立に採用。",
+      "z0_track_veto_enabled": "true: ビーム軸条件の後、Z<=15 mmのraw TPCヒットを含むイベントを除外。その後にrawヒット数を選別。"
+    },
+    "beam_axis_overlay": {
+      "_": "ピクセル図の表示だけのビーム印。イベント選別条件は変更しない。",
+      "enabled": "true: 他コードの保存ビーム軸を重ねる。",
+      "z_range_mm": "XZ/YZに軸を描くZ範囲。fit範囲内は実線、範囲外は外挿の破線。",
+      "marker_z_mm": "星印を置くZ平面。既定は底面シンチのブロック中心Z=346.06 mm。XYの星はこの平面での通過点。"
+    },
+    "output_groups": "with_z0_cut: Z<=15 mmのraw TPCヒットを含むイベントを除外（個別候補は通過確認済み）。without_z0_cut: このイベント除外なし。comparison: 前後比較。shared: 両方が入る積算配列や共通キャッシュ。ビーム距離選別はZ側除外とは独立。",
+    "preparation": "全完成rawを対象に頂点とZ側除外を作る。頂点は10万イベントごとに結合してメモリを抑える。末尾tmpは既存の未選別全積算だけに含まれ、この段階別解析には含まない。",
+    "data_label": "全シンチ位置図とTPC図に付けるデータ名。",
+    "dataset_polarization": "ユーザー指定の偏光種別。circular=円偏光。方位角の変調fitを円偏光度へ換算するものではない。"
+  },
+  "_units": {
+    "pitch_strip": "mm",
+    "velocity": "mm/clock",
+    "clock_offset": "clock",
+    "z_gem": "mm",
+    "z_veto": "mm",
+    "polarization.beam_max_distance_mm": "mm",
+    "polarization.min_pair_distance_mm": "mm",
+    "polarization.phi_bins": "bins",
+    "single_hit_pixels.beam_max_distance_mm": "mm",
+    "beam_axis_overlay.z_range_mm": "mm",
+    "beam_axis_overlay.marker_z_mm": "mm"
+  },
+  "data_root": "/mnt/d/UVSOR2026_late",
+  "storages": [
+    "calltt",
+    "killua"
+  ],
+  "runs": [
+    "20261125_run00",
+    "20261125_run01",
+    "20261125_run03",
+    "20261125_run04",
+    "20261125_run05"
+  ],
+  "result_dir": "ETCC_cal/output/20261125_vertical",
+  "pitch_strip": 0.4,
+  "velocity": 0.39358,
+  "clock_offset": 133.69,
+  "z_gem": 5.0,
+  "z_veto": 15.0,
+  "inputs": {
+    "vertices_all": "ETCC_cal/output/20261125_vertical/without_z0_cut/vertices/all.csv",
+    "event_points": "ETCC_cal/output/20261125_vertical/with_z0_cut/events/run06_trig22204.json",
+    "scintillator_counts": "ETCC_cal/output/20261125_vertical/without_z0_cut/scintillator/all_raw_blocks.json",
+    "event_candidates": [
+      "ETCC_cal/output/20261125_vertical/with_z0_cut/events/run06_trig22204.json",
+      "ETCC_cal/output/20261125_vertical/with_z0_cut/events/run06_trig55668.json"
+    ],
+    "ha_position_calibration_dir": "/home/onoda/ANLNext/Erica_git_dev/EricaNext/calib/psa",
+    "scintillator_geometry": "PSA_analysis/param/geometry_sm3.csv",
+    "polarization_vertices": "ETCC_cal/output/20261125_vertical/without_z0_cut/vertices/all.csv",
+    "polarization_beam_axis": "ETCC_cal/output/20261124_run06_07/with_z0_cut/beam_axis/axis_z0veto.json",
+    "single_hit_cache_dir": "ETCC_cal/output/20261125_vertical/shared/ha_hit_cache"
+  },
+  "outputs": {
+    "veto_dir": "ETCC_cal/output/20261125_vertical/shared/selection",
+    "vertices_selected": "ETCC_cal/output/20261125_vertical/with_z0_cut/vertices/z0veto.csv",
+    "vertex_figure": "ETCC_cal/output/20261125_vertical/with_z0_cut/vertices/no_xy_selection.png",
+    "selection_summary": "ETCC_cal/output/20261125_vertical/shared/selection/summary.json",
+    "track_histogram": "ETCC_cal/output/20261125_vertical/shared/tracks/track_sum.npz",
+    "track_metadata": "ETCC_cal/output/20261125_vertical/shared/tracks/track_sum.json",
+    "track_figure": "ETCC_cal/output/20261125_vertical/comparison/tracks/track_sum.png",
+    "beam_axis_prefix": "ETCC_cal/output/20261125_vertical/with_z0_cut/beam_axis/axis_z0veto",
+    "event_figure_prefix": "ETCC_cal/output/20261125_vertical/with_z0_cut/events/run06_trig22204",
+    "scintillator_figure": "ETCC_cal/output/20261125_vertical/without_z0_cut/scintillator/all_raw_blocks.png",
+    "lg_event_dir": "ETCC_cal/output/20261125_vertical/with_z0_cut/events/lg",
+    "pixel_polarization_prefix": "ETCC_cal/output/20261125_vertical/with_z0_cut/polarization/pixel_beam10_z0",
+    "polarization_hit_cache_dir": "ETCC_cal/output/20261125_vertical/shared/ha_hit_cache",
+    "single_hit_pixel_prefix": "ETCC_cal/output/20261125_vertical/with_z0_cut/single_hit/pixel_beam10_z0",
+    "stage_pixel_map_root": "ETCC_cal/output/20261125_vertical"
+  },
+  "polarization": {
+    "require_exactly_two_raw_hits": true,
+    "beam_vertex_cut_enabled": true,
+    "beam_max_distance_mm": 10.0,
+    "common_pairs_only": false,
+    "pair_weighting": "per_event",
+    "beam_direction_source": "fitted_line",
+    "beam_direction": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "reference_axis": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "min_pair_distance_mm": 0.0,
+    "phi_bins": 18,
+    "max_files_per_board": 0,
+    "include_tmp": false,
+    "z0_track_veto_enabled": true
+  },
+  "single_hit_pixels": {
+    "beam_vertex_cut_enabled": true,
+    "beam_max_distance_mm": 10.0,
+    "common_events_only": false,
+    "z0_track_veto_enabled": true
+  },
+  "beam_axis_overlay": {
+    "enabled": true,
+    "z_range_mm": [
+      5.0,
+      365.0
+    ],
+    "marker_z_mm": 346.06
+  },
+  "preparation": {
+    "runs_to_reconstruct": [
+      "20261125_run00",
+      "20261125_run01",
+      "20261125_run03",
+      "20261125_run04",
+      "20261125_run05"
+    ],
+    "event_chunk_size": 100000,
+    "keep_clocks": 16,
+    "include_tmp": false
+  },
+  "data_label": "Vertical polarization, 20261125 run00, 01, 03, 04, 05",
+  "dataset_polarization": "circular"
+}

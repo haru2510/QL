@@ -1,0 +1,105 @@
+{
+  "_doc": {
+    "_": "TPC の飛跡による偏光解析（run_pipeline.py）の設定。相対パスはリポジトリ直下が基準。'_' で始まるキーは説明で、読み込み時に無視する。",
+    "name": "解析の名前（表示用）。",
+    "output_dir": "結果の保存先。この下に stage0_inputs, stage1_vertices, ... を作る。",
+    "beam_axis_fit": "ビーム軸の fit 結果（beam_axis.py の出力 JSON）。全データセットで同じ軸を使う。",
+    "run_stages": "--stages を省略したときに実行するステージ。",
+    "datasets": "偏光ごとのデータ。etcc_config は raw の場所・較正・散乱点 CSV・Z 側除外の場所を持つ既存の ETCC_cal 設定。runs はその中で使うラン。",
+    "samples": "datasets（全ラン）以外に、ランの部分集合を名前付きで定義する（同じ偏光の中での比較などに使う）。",
+    "scan": {
+      "_": "stage2 で raw を読む範囲。変えると stage2 をやり直す。",
+      "beam_radius_mm": "ビーム軸からこの距離以内の散乱点を読む。cut set の beam_radius_mm はこれ以下にする。",
+      "radius_mm": "散乱点からこの距離以内のストリップで fit する。",
+      "workers": "並列に読むランの数。"
+    },
+    "cut_sets": {
+      "_": "カットの組。base で別の組を継承し、変えるところだけ書ける。stage3〜5 は組ごとに別フォルダに出力する。",
+      "z_veto": "true: Z <= z_veto（ETCC 設定）の raw TPC ヒットを持つイベントと、Z <= z_veto の散乱点を除く。false の組が1つでもあると、stage2 は除外にかかったイベントも読む（約3倍、やり直しになる）。",
+      "beam_radius_mm": "散乱点とビーム軸の距離の上限。",
+      "single_line": "投影が『きれいな1本』の条件: Z 幅 >= min_span_mm、直線に乗ったストリップの割合 >= min_inlier_fraction。",
+      "two_branch": "投影が『2本』の条件: 2本の角度差 >= min_separation_deg、各枝の Z 幅 >= min_branch_span_mm（短いと1本の曲がった飛跡を2本に割った偽物が入る）、2本に乗った割合 >= min_inlier_fraction。"
+    },
+    "analysis": {
+      "pair": "対生成の候補（DS・SD・DD）: Q と DD の ψ の比。psi_bins は 0〜90° のビン数。",
+      "single_track": "1本の飛跡（SS）: θ >= theta_min_deg ごとの φ の比。phi_bins は 0〜360° のビン数。"
+    },
+    "comparisons": "numerator ÷ denominator の比較。分母は偏光の無い円偏光が基本。同じ偏光同士の比較（系統誤差の確認）も入れる。",
+    "event_display": "stage5 のイベントの絵。cut_sets を省略すると全部の組で描く。"
+  },
+  "name": "20261124-25 UVSOR 6.6 MeV: horizontal / vertical / circular",
+  "output_dir": "ETCC_cal/output/pair_analysis/20261124_25",
+  "beam_axis_fit": "ETCC_cal/output/20261124_run06_07/with_z0_cut/beam_axis/axis_z0veto.json",
+  "run_stages": [0, 1, 2, 3, 4, 5],
+
+  "datasets": {
+    "horizontal": {
+      "label": "horizontal 1124 run00-07",
+      "etcc_config": "ETCC_cal/config/20261124_run00_07_horizontal.json",
+      "runs": ["20261124_run00", "20261124_run01", "20261124_run02", "20261124_run03",
+               "20261124_run04", "20261124_run05", "20261124_run06", "20261124_run07"]
+    },
+    "circular": {
+      "label": "circular 1124 run08-12",
+      "etcc_config": "ETCC_cal/config/20261124_run08_12_circular.json",
+      "runs": ["20261124_run08", "20261124_run09", "20261124_run10", "20261124_run11", "20261124_run12"]
+    },
+    "vertical": {
+      "label": "vertical 1125",
+      "etcc_config": "ETCC_cal/config/20261125_vertical.json",
+      "runs": ["20261125_run00", "20261125_run01", "20261125_run03", "20261125_run04", "20261125_run05"]
+    }
+  },
+
+  "samples": {
+    "horizontal_run00_05": {"dataset": "horizontal", "label": "horizontal run00-05",
+                            "runs": ["20261124_run00", "20261124_run01", "20261124_run02", "20261124_run03", "20261124_run04", "20261124_run05"]},
+    "horizontal_run06_07": {"dataset": "horizontal", "label": "horizontal run06-07", "runs": ["20261124_run06", "20261124_run07"]},
+    "vertical_run00": {"dataset": "vertical", "label": "vertical run00", "runs": ["20261125_run00"]},
+    "vertical_run01_05": {"dataset": "vertical", "label": "vertical run01-05",
+                          "runs": ["20261125_run01", "20261125_run03", "20261125_run04", "20261125_run05"]}
+  },
+
+  "scan": {
+    "beam_radius_mm": 10.0,
+    "radius_mm": 40.0,
+    "workers": 4
+  },
+
+  "cut_sets": {
+    "default": {
+      "z_veto": true,
+      "beam_radius_mm": 5.0,
+      "single_line": {"min_span_mm": 10.0, "min_inlier_fraction": 0.7},
+      "two_branch": {"min_separation_deg": 6.0, "min_branch_span_mm": 25.0, "min_inlier_fraction": 0.7}
+    },
+    "branch_span15": {"base": "default", "two_branch": {"min_branch_span_mm": 15.0}},
+    "branch_span30": {"base": "default", "two_branch": {"min_branch_span_mm": 30.0}},
+    "separation10": {"base": "default", "two_branch": {"min_separation_deg": 10.0}},
+    "beam10": {"base": "default", "beam_radius_mm": 10.0}
+  },
+
+  "analysis": {
+    "pair": {"enabled": true, "psi_bins": 9},
+    "single_track": {"enabled": true, "theta_min_deg": [10.0, 20.0, 30.0], "phi_bins": 18}
+  },
+
+  "comparisons": [
+    {"name": "horizontal_over_circular", "numerator": "horizontal", "denominator": "circular", "note": "same day (1124)"},
+    {"name": "vertical_over_circular", "numerator": "vertical", "denominator": "circular", "note": "different days"},
+    {"name": "horizontal_over_vertical", "numerator": "horizontal", "denominator": "vertical", "note": "different days, 90 deg apart"},
+    {"name": "null_horizontal_run00_05_over_run06_07", "numerator": "horizontal_run00_05", "denominator": "horizontal_run06_07", "note": "same polarization: expect flat"},
+    {"name": "null_vertical_run00_over_run01_05", "numerator": "vertical_run00", "denominator": "vertical_run01_05", "note": "same polarization: expect flat"}
+  ],
+
+  "event_display": {
+    "enabled": true,
+    "cut_sets": ["default"],
+    "dataset": "horizontal",
+    "run": "20261124_run06",
+    "classes": ["DD", "DS", "SD", "SS"],
+    "count": 6,
+    "skip": 0,
+    "context_mm": 100.0
+  }
+}
