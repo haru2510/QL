@@ -33,7 +33,8 @@ COLORS = ("#2a78d6", "#eb6834")  # 分子, 分母
 
 def load_classified(pipeline, cut_name, sample_name):
     with np.load(pipeline.stage_dir(3, cut_name) / f"{sample_name}.npz") as saved:
-        return {key: saved[key] for key in ("cls", "psi", "psi_lo", "psi_hi", "theta", "phi")}
+        keys = ("cls", "psi", "psi_lo", "psi_hi", "theta", "phi", "pairing", "phi_pair")
+        return {key: saved[key] for key in keys if key in saved.files}
 
 
 # ---------------------------------------------------------------- 対生成
@@ -190,7 +191,7 @@ def plot_pair_curve(result, plot_data, title, target):
     edges = np.linspace(0, 90, n_points - 1)  # DD のビンの端（横棒 = ビンの幅）
     use = ok & dd
     bin_index = np.flatnonzero(use) - 1
-    xerr = [psi_eff[use] - edges[bin_index], edges[bin_index + 1] - psi_eff[use]]
+    xerr = np.clip([psi_eff[use] - edges[bin_index], edges[bin_index + 1] - psi_eff[use]], 0, None)
     ax.errorbar(psi_eff[use], ratio[use], yerr=error[use], xerr=xerr, fmt="o", color="black", ms=5, label="DD (ψ bins; bar = bin width)")
     for k, name in edge_points.items():
         lo, hi = result["median_psi_range_deg"][name]
@@ -259,7 +260,7 @@ def plot_overview(pipeline, cut_name, settings, bins, target):
         fits[n] = fit
         x = psi_eff + (i - (len(others) - 1) / 2) * 0.9
         bin_index = np.flatnonzero(use) - 1
-        xerr = [x[use] - edges[bin_index], edges[bin_index + 1] - x[use]]
+        xerr = np.clip([x[use] - edges[bin_index], edges[bin_index + 1] - x[use]], 0, None)  # ずらした点でも負にしない
         ax.errorbar(x[use], ratio[use], yerr=error[use], xerr=xerr, fmt="o", ms=5, color=color[n],
                     label=f"{label[n]} / {label[reference]}: DD fit μ = {fit['mu']:+.3f} ± {fit['mu_err']:.3f} ({fit['significance_sigma']:.1f}σ)")
         ax.errorbar(x[~dd], ratio[~dd], yerr=error[~dd], fmt="s", ms=7, mfc="white", mec=color[n], ecolor=color[n])
@@ -277,6 +278,47 @@ def plot_overview(pipeline, cut_name, settings, bins, target):
     plt.close(fig)
     return {"samples": names, "reference": reference, "counts": {n: counts[n].tolist() for n in names},
             "mean_cos2": c_k.tolist(), "dd_fit": fits}
+
+
+# ---------------------------------------------------------------- 組み方を決めた DD の φ（0〜180°）
+def pair_phi_result(data, labels, bins):
+    """組み方を決めた DD の面の方位角 φ_pair の比を A [1 + μ cos 2(φ − φ0)] で fit する（φ0 も自由）。"""
+    edges = np.linspace(0, 180, bins + 1)
+    centres = 0.5 * (edges[1:] + edges[:-1])
+    hists = [np.histogram(d["phi_pair"][np.isfinite(d["phi_pair"])], bins=edges)[0] for d in data]
+    ratio, error, ok = normalized_ratio(hists[0], hists[1])
+    fit, model = fit_cos2_free_phase(centres[ok], ratio[ok], error[ok])
+    decided = [{"DD": int(np.sum(d["cls"] == DD)), "decided": int(np.isfinite(d["phi_pair"]).sum())} for d in data]
+    result = {"labels": labels, "phi_edges_deg": edges.tolist(), "counts": [h.tolist() for h in hists], "events": decided, "fit": fit}
+    return result, (centres, hists, ratio, error, ok, model)
+
+
+def plot_pair_phi(result, plot_data, title, target):
+    centres, hists, ratio, error, ok, model = plot_data
+    labels, fit = result["labels"], result["fit"]
+    bins = len(centres)
+    half = 90.0 / bins
+    fig, axes = plt.subplots(1, 2, figsize=(15, 5.2), constrained_layout=True)
+    ax = axes[0]
+    for h, label, color, ev in zip(hists, labels, COLORS, result["events"]):
+        n = h.sum()
+        ax.errorbar(centres, h / n * bins, yerr=np.sqrt(h) / n * bins, xerr=half, fmt="o", ms=4, color=color,
+                    label=f"{label}: {ev['decided']:,} of {ev['DD']:,} DD paired")
+    ax.set(xlabel="φ_pair [deg]  (pair plane; 0: ∥ X, 90: ∥ Y)", ylabel="normalized (mean = 1)",
+           title="DD with resolved XZ/YZ pairing", xlim=(0, 180))
+    ax.legend(fontsize=8, frameon=False)
+    ax = axes[1]
+    ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], xerr=half, fmt="o", color="black", ms=4)
+    xx = np.linspace(0, 180, 361)
+    ax.plot(xx, model(xx, fit["A"], fit["mu"], fit["phi0_deg"]), color="#e34948",
+            label=f"μ = {fit['mu']:.3f} ± {fit['mu_err']:.3f}, φ0 = {fit['phi0_deg']:.0f} ± {fit['phi0_err_deg']:.0f}° "
+                  f"({fit['significance_sigma']:.1f}σ vs flat)\nχ²/ndf = {fit['chi2']:.1f}/{fit['ndf']}")
+    ax.axhline(1, color="0.6", lw=0.8)
+    ax.set(xlabel="φ_pair [deg]", ylabel="ratio (each normalized)", title=f"{labels[0]} / {labels[1]}: A[1 + μ cos 2(φ − φ0)]", xlim=(0, 180))
+    ax.legend(fontsize=8, frameon=False)
+    fig.suptitle(title)
+    fig.savefig(target, dpi=120)
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------- 1本の飛跡
@@ -349,6 +391,14 @@ def run(pipeline, cut_set_names=None):
                                  "Q": [a["Q"] for a in result["asymmetry"]], "delta_Q": result["delta_Q"],
                                  "dd_mu": result["dd_psi_fit"]["mu"], "dd_mu_err": result["dd_psi_fit"]["mu_err"],
                                  "dd_sigma": result["dd_psi_fit"]["significance_sigma"]}
+            paired = [int(np.isfinite(d["phi_pair"]).sum()) if "phi_pair" in d else 0 for d in data]
+            if pipeline.pairing.get("enabled", False) and min(paired) >= 50:  # 組み方の材料が無い（足りない）サンプルは飛ばす
+                result, plot_data = pair_phi_result(data, labels, pair_settings.get("phi_bins", 12))
+                (folder / "pair_phi.json").write_text(json.dumps(result, indent=1) + "\n")
+                plot_pair_phi(result, plot_data, title + "  (DD, resolved pairing)", folder / "pair_phi.png")
+                f = result["fit"]
+                entry["pair_phi"] = {"events": [e["decided"] for e in result["events"]], "mu": f["mu"], "mu_err": f["mu_err"],
+                                     "phi0_deg": f["phi0_deg"], "phi0_err_deg": f["phi0_err_deg"], "sigma": f["significance_sigma"]}
             if single_settings.get("enabled", True):
                 result, plot_data = single_track_result(data, labels, single_settings["theta_min_deg"], single_settings["phi_bins"])
                 (folder / "single_track.json").write_text(json.dumps(result, indent=1) + "\n")
@@ -377,6 +427,9 @@ def print_entry(cut_name, entry):
         text += (f" pair ΔQ = {p['delta_Q']['value']:+.4f} ± {p['delta_Q']['err']:.4f} ({p['delta_Q']['significance_sigma']:.1f}σ),"
                  f" DD μ = {p['dd_mu']:+.3f} ± {p['dd_mu_err']:.3f} ({p['dd_sigma']:.1f}σ),"
                  f" (reference DS+DD+SD μ = {p['all_points_mu']:+.3f}, χ²/ndf = {p['all_points_chi2']:.1f}/{p['all_points_ndf']})")
+    if "pair_phi" in entry:
+        q = entry["pair_phi"]
+        text += f" | DD φ: μ = {q['mu']:.3f} ± {q['mu_err']:.3f} at φ0 = {q['phi0_deg']:.0f} ± {q['phi0_err_deg']:.0f}° ({q['sigma']:.1f}σ)"
     if "single_track" in entry:
         s = entry["single_track"]
         text += f" | SS θ>={s['theta_min_deg']:g}: μ = {s['mu']:.3f} ± {s['mu_err']:.3f} at {s['phi0_deg']:.0f}° ({s['sigma']:.1f}σ)"
@@ -385,7 +438,7 @@ def print_entry(cut_name, entry):
 
 def summary_markdown(cut_name, cuts, summary):
     lines = [f"# Modulation summary: {cut_name}", "", "```json", json.dumps(cuts, indent=1), "```", "",
-             "| comparison | pair events | Q (num / den) | ΔQ | DD μ (cos 2ψ) | reference: DS+DD+SD μ (χ²/ndf) | single-track μ, φ0 |", "|---|---|---|---|---|---|---|"]
+             "| comparison | pair events | Q (num / den) | ΔQ | DD μ (cos 2ψ) | reference: DS+DD+SD μ (χ²/ndf) | DD φ (resolved pairing): μ, φ0 | single-track μ, φ0 |", "|---|---|---|---|---|---|---|---|"]
     for e in summary:
         p, s = e.get("pair"), e.get("single_track")
         pair_cells = ["-"] * 5
@@ -395,8 +448,10 @@ def summary_markdown(cut_name, cuts, summary):
                           f"{d['value']:+.3f} ± {d['err']:.3f} ({d['significance_sigma']:.1f}σ)",
                           f"{p['dd_mu']:+.3f} ± {p['dd_mu_err']:.3f} ({p['dd_sigma']:.1f}σ)",
                           f"{p['all_points_mu']:+.3f} ± {p['all_points_mu_err']:.3f} ({p['all_points_chi2']:.1f}/{p['all_points_ndf']})"]
+        q = e.get("pair_phi")
+        phi_cell = (f"{q['mu']:.3f} ± {q['mu_err']:.3f}, {q['phi0_deg']:.0f} ± {q['phi0_err_deg']:.0f}° ({q['sigma']:.1f}σ)" if q else "-")
         single_cell = (f"θ≥{s['theta_min_deg']:g}°: {s['mu']:.3f} ± {s['mu_err']:.3f}, {s['phi0_deg']:.0f}° ({s['sigma']:.1f}σ)"
                        if s else "-")
-        lines.append(f"| {e['comparison']} ({e['numerator']} / {e['denominator']}) | " + " | ".join(pair_cells) + f" | {single_cell} |")
+        lines.append(f"| {e['comparison']} ({e['numerator']} / {e['denominator']}) | " + " | ".join(pair_cells) + f" | {phi_cell} | {single_cell} |")
     lines += ["", "σ: statistical only. DD μ: fit to DD ψ bins, Δχ² vs flat with 1 dof (main result). Reference DS+DD+SD μ assumes ψ of DS/SD uniform in its allowed range and does not fit well (DS/SD show smaller modulation). Single-track uses 2 dof (μ, φ0)."]
     return "\n".join(lines) + "\n"

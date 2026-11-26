@@ -16,13 +16,18 @@ XZ と YZ の枝の組み方が2通りあり区別できないので、X 軸で�
 
 DS・SD の ψ は1つに決まらないので、とりうる範囲 [psi_lo, psi_hi] を保存する（psi_range の説明を参照）。
 
-出力: stage3_classify/<cut_set>/<sample>.npz（run, event, cls, psi, psi_lo, psi_hi, theta, phi）, cutflow.json, cutflow.md
+DD の枝の組み方（stage2 の組み方の材料があるとき）: branch_pairing.decide で A / B を決め、面の方位角
+φ_pair = atan2(±Δy', Δx')（A なら +、B なら −、0〜180°、0 = 面が X）を出す。決められないものは NaN。
+
+出力: stage3_classify/<cut_set>/<sample>.npz（run, event, cls, psi, psi_lo, psi_hi, theta, phi, pairing, pairing_method, phi_pair）, cutflow.json, cutflow.md
 """
 import json
 
 import numpy as np
 
 from pixel_polarization import fitted_axis
+
+from .branch_pairing import decide
 
 CLASS_NAMES = {0: "other", 1: "SS", 2: "DS", 3: "SD", 4: "DD"}
 SS, DS, SD, DD = 1, 2, 3, 4
@@ -31,12 +36,39 @@ SS, DS, SD, DD = 1, 2, 3, 4
 def load_sample(pipeline, sample):
     """サンプルのランの stage2 結果をつなげる。run は sample["runs"] の何番目か。"""
     parts = {key: [] for key in ("event", "vertex", "beam_distance", "z_vetoed", "single", "double", "run")}
+    parts["pair_r"], parts["pair_end"] = [], []
     for index, run_name in enumerate(sample["runs"]):
-        with np.load(pipeline.stage_dir(2, sample["dataset"]) / f"{run_name}.npz") as saved:
+        folder = pipeline.stage_dir(2, sample["dataset"])
+        with np.load(folder / f"{run_name}.npz") as saved:
             for key in ("event", "vertex", "beam_distance", "z_vetoed", "single", "double"):
                 parts[key].append(saved[key])
             parts["run"].append(np.full(len(saved["event"]), index, np.int16))
+            events = saved["event"]
+        # 組み方の材料（両投影で2本 fit が成立したイベントだけにある）を同じ並びにそろえる
+        r = np.full((len(events), 2, 2), np.nan)
+        end = np.full((len(events), 2, 2), np.nan)
+        pairing = folder / f"{run_name}_pairing.npz"
+        if pairing.exists():
+            with np.load(pairing) as saved:
+                rows = np.searchsorted(events, saved["event"])
+                r[rows], end[rows] = saved["r"], saved["end_dz"]
+        parts["pair_r"].append(r)
+        parts["pair_end"].append(end)
     return {key: np.concatenate(values) for key, values in parts.items()}
+
+
+def pair_plane_angle(cls, double, pair_r, pair_end, rule):
+    """DD の組み方を決め、面の方位角 φ_pair [deg, 0-180] を出す。pairing: +1 = A, -1 = B, 0 = 決められない。"""
+    pairing = np.zeros(len(cls), np.int8)
+    method = np.full(len(cls), "", dtype="<U11")
+    if not rule.get("enabled", False):
+        return pairing, method, np.full(len(cls), np.nan)
+    for i in np.flatnonzero(cls == DD):
+        pairing[i], method[i] = decide(pair_r[i], pair_end[i], rule)
+    dx = double[:, 0, 1] - double[:, 0, 0]
+    dy = double[:, 1, 1] - double[:, 1, 0]
+    phi = np.where(pairing != 0, np.degrees(np.arctan2(pairing * dy, dx)) % 180, np.nan)
+    return pairing, method, phi
 
 
 def projection_flags(single, double, cuts):
@@ -150,12 +182,16 @@ def run(pipeline, cut_set_names=None):
             cls, psi = classify(data["single"], data["double"], cuts)
             psi_lo, psi_hi = psi_range(cls, psi, data["double"], cuts)
             theta, phi = track_angles(data["single"], beam_direction)
+            pairing, method, phi_pair = pair_plane_angle(cls, data["double"], data["pair_r"], data["pair_end"], pipeline.pairing)
             np.savez_compressed(folder / f"{sample_name}.npz", run=data["run"][base], event=data["event"][base],
                                 cls=cls[base], psi=psi[base], psi_lo=psi_lo[base], psi_hi=psi_hi[base], theta=theta[base], phi=phi[base],
+                                pairing=pairing[base], pairing_method=method[base], phi_pair=phi_pair[base],
                                 runs=np.array(sample["runs"]))
             flows[sample_name] = cut_flow(pipeline, sample, data, cuts, base, cls)
             counts = {CLASS_NAMES[k]: int((cls[base] == k).sum()) for k in CLASS_NAMES}
-            print(f"  [{cut_name}] {sample_name}: {counts}", flush=True)
+            dd = base & (cls == DD)
+            decided = {m: int(np.sum(dd & (method == m))) for m in ("correlation", "end_z", "undecided")}
+            print(f"  [{cut_name}] {sample_name}: {counts}, DD pairing {decided}", flush=True)
         (folder / "cutflow.json").write_text(json.dumps({"cuts": cuts, "samples": flows}, indent=1) + "\n")
         (folder / "cutflow.md").write_text(cutflow_markdown(cut_name, cuts, flows, pipeline))
         print(f"  saved {folder / 'cutflow.md'}", flush=True)

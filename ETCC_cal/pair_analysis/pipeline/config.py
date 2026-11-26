@@ -54,6 +54,7 @@ class Pipeline:
         self.analysis = settings["analysis"]
         self.comparisons = settings["comparisons"]
         self.event_display = settings.get("event_display", {"enabled": False})
+        self.pairing = settings.get("pairing", {"enabled": False})
         self.samples = self._build_samples(settings.get("samples", {}))
         self.cut_sets = self._expand_cut_sets(settings["cut_sets"])
         # Z 側除外を外す cut set が1つでもあれば、stage2 で除外にかかったイベントも読む（読む量が約3倍）

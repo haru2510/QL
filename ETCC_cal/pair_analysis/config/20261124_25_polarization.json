@@ -25,10 +25,22 @@
       "single_track": "1本の飛跡（SS）: θ >= theta_min_deg ごとの φ の比。phi_bins は 0〜360° のビン数。",
       "overview": "全体図: samples を1枚に重ね、reference に対する比を描く（DD の点だけで fit、DS・SD は参考の点）。"
     },
+    "pairing": {
+      "_": "DD の XZ・YZ の枝の組み方を決める（branch_pairing.py）。enabled が true なら stage2 で枝を下流まで追い、stage3 で組み方と面の方位角 φ_pair（0〜180°）を出す。",
+      "context_mm": "枝を追う範囲（散乱点からの距離）。",
+      "window_mm": "枝の予測位置からこの距離以内の塊を、その枝のものとする。",
+      "gap_mm": "枝の塊がこの Z 幅だけ続けて無ければ、その枝は終わり。",
+      "shared_mm": "2本の予測位置の差がこれより小さいクロックは、どちらの枝か分からないので使わない。",
+      "cluster_gap_mm": "1クロックのストリップを、これより離れたところで別の塊に分ける。",
+      "refit_length_mm": "予測に使う、直近の塊の重心の Z 幅。",
+      "min_clocks": "相関を計算するのに必要なクロック数。",
+      "min_r_difference": "（stage3）組み方 A と B の相関の差がこれ以上なら相関で決める。",
+      "min_end_difference_mm": "（stage3）相関で決まらず、A と B の『端の Z の差の合計』の違いがこれ以上なら端で決める。"
+    },
     "comparisons": "numerator ÷ denominator の比較。分母は偏光の無い円偏光が基本。同じ偏光同士の比較（系統誤差の確認）も入れる。",
     "event_display": "stage5 のイベントの絵。cut_sets を省略すると全部の組で描く。"
   },
-  "name": "20261124-25 UVSOR 6.6 MeV: horizontal / vertical / circular",
+  "name": "20261124-25 UVSOR 6.6 MeV: horizontal / vertical / 45 deg / circular",
   "output_dir": "ETCC_cal/output/pair_analysis/20261124_25",
   "beam_axis_fit": "ETCC_cal/output/20261124_run06_07/with_z0_cut/beam_axis/axis_z0veto.json",
   "run_stages": [0, 1, 2, 3, 4, 5],
@@ -44,6 +56,11 @@
       "label": "circular 1124 run08-12",
       "etcc_config": "ETCC_cal/config/20261124_run08_12_circular.json",
       "runs": ["20261124_run08", "20261124_run09", "20261124_run10", "20261124_run11", "20261124_run12"]
+    },
+    "diagonal45": {
+      "label": "45 deg 1125 run06",
+      "etcc_config": "ETCC_cal/config/20261125_run06_45deg.json",
+      "runs": ["20261125_run06"]
     },
     "vertical": {
       "label": "vertical 1125",
@@ -67,6 +84,19 @@
     "workers": 4
   },
 
+  "pairing": {
+    "enabled": true,
+    "context_mm": 250.0,
+    "window_mm": 2.4,
+    "gap_mm": 10.0,
+    "shared_mm": 4.0,
+    "cluster_gap_mm": 1.0,
+    "refit_length_mm": 30.0,
+    "min_clocks": 15,
+    "min_r_difference": 0.1,
+    "min_end_difference_mm": 20.0
+  },
+
   "cut_sets": {
     "default": {
       "z_veto": true,
@@ -81,14 +111,15 @@
   },
 
   "analysis": {
-    "pair": {"enabled": true, "psi_bins": 9},
+    "pair": {"enabled": true, "psi_bins": 9, "phi_bins": 12},
     "single_track": {"enabled": true, "theta_min_deg": [10.0, 20.0, 30.0], "phi_bins": 18},
-    "overview": {"enabled": true, "samples": ["horizontal", "vertical", "circular"], "reference": "circular"}
+    "overview": {"enabled": true, "samples": ["horizontal", "vertical", "diagonal45", "circular"], "reference": "circular"}
   },
 
   "comparisons": [
     {"name": "horizontal_over_circular", "numerator": "horizontal", "denominator": "circular", "note": "same day (1124)"},
     {"name": "vertical_over_circular", "numerator": "vertical", "denominator": "circular", "note": "different days"},
+    {"name": "diagonal45_over_circular", "numerator": "diagonal45", "denominator": "circular", "note": "45 deg: folded ψ should be flat"},
     {"name": "horizontal_over_vertical", "numerator": "horizontal", "denominator": "vertical", "note": "different days, 90 deg apart"},
     {"name": "null_horizontal_run00_05_over_run06_07", "numerator": "horizontal_run00_05", "denominator": "horizontal_run06_07", "note": "same polarization: expect flat"},
     {"name": "null_vertical_run00_over_run01_05", "numerator": "vertical_run00", "denominator": "vertical_run01_05", "note": "same polarization: expect flat"}
