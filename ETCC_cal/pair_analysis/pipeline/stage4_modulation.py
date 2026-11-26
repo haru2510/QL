@@ -83,7 +83,8 @@ def plot_pair(result, plot_data, title, target):
 
     ax = axes[2]  # DD の比と fit
     fit = result["dd_psi_fit"]
-    ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], fmt="o", color="black", ms=4)
+    half = 45.0 / bins  # 横棒 = ψ のビンの幅
+    ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], xerr=half, fmt="o", color="black", ms=4)
     xx = np.linspace(0, 90, 181)
     ax.plot(xx, model(xx, fit["A"], fit["mu"]), color="#e34948",
             label=f"μ = {fit['mu']:+.3f} ± {fit['mu_err']:.3f}  ({fit['significance_sigma']:.1f}σ vs flat)\n"
@@ -169,7 +170,11 @@ def plot_pair_curve(result, plot_data, title, target):
 
     ax = axes[1]  # 比と fit
     dd = np.array([k not in edge_points for k in range(n_points)])
-    ax.errorbar(psi_eff[ok & dd], ratio[ok & dd], yerr=error[ok & dd], fmt="o", color="black", ms=5, label="DD (ψ bins)")
+    edges = np.linspace(0, 90, n_points - 1)  # DD のビンの端（横棒 = ビンの幅）
+    use = ok & dd
+    bin_index = np.flatnonzero(use) - 1
+    xerr = [psi_eff[use] - edges[bin_index], edges[bin_index + 1] - psi_eff[use]]
+    ax.errorbar(psi_eff[use], ratio[use], yerr=error[use], xerr=xerr, fmt="o", color="black", ms=5, label="DD (ψ bins; bar = bin width)")
     for k, name in edge_points.items():
         lo, hi = result["median_psi_range_deg"][name]
         ax.errorbar([psi_eff[k]], [ratio[k]], yerr=[error[k]], xerr=[[psi_eff[k] - lo], [hi - psi_eff[k]]], fmt="s", ms=7,
@@ -183,7 +188,7 @@ def plot_pair_curve(result, plot_data, title, target):
     ax.set(xlabel="ψ [deg]  (0: e+e- plane ∥ X, 90: ∥ Y)", ylabel="ratio (each normalized to all pair candidates)",
            title=f"{labels[0]} / {labels[1]}", xlim=(-3, 93))
     ax.legend(fontsize=8, frameon=False, loc="upper right")
-    ax.text(0.01, 0.02, "DS / SD: point at the effective ψ, horizontal bar = median allowed ψ range (ψ assumed uniform in it)",
+    ax.text(0.01, 0.02, "DD: horizontal bar = bin width.  DS / SD: point at the effective ψ, bar = median allowed ψ range (ψ assumed uniform in it)",
             transform=ax.transAxes, fontsize=7, color="0.35")
     fig.suptitle(title)
     fig.savefig(target, dpi=120)
@@ -218,7 +223,7 @@ def plot_single_track(result, plot_data, title, target):
         ax.set(xlabel="φ [deg] (0 = detector X)", ylabel="normalized (mean = 1)", title=f"SS, θ >= {theta_min:g}°", xlim=(0, 360))
         ax.legend(fontsize=8, frameon=False)
         ax = axes[row, 1]
-        ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], fmt="o", color="black", ms=4)
+        ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], xerr=180.0 / bins, fmt="o", color="black", ms=4)  # 横棒 = φ のビンの幅
         ax.plot(xx, model(xx, fit["A"], fit["mu"], fit["phi0_deg"]), color="#e34948",
                 label=f"μ = {fit['mu']:.3f} ± {fit['mu_err']:.3f}, φ0 = {fit['phi0_deg']:.0f} ± {fit['phi0_err_deg']:.0f}° "
                       f"({fit['significance_sigma']:.1f}σ)\nχ²/ndf = {fit['chi2']:.1f}/{fit['ndf']}")
