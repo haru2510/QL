@@ -281,13 +281,23 @@ def plot_overview(pipeline, cut_name, settings, bins, target):
 
 
 # ---------------------------------------------------------------- 組み方を決めた DD の φ（0〜180°）
-def pair_phi_result(data, labels, bins):
-    """組み方を決めた DD の面の方位角 φ_pair の比を A [1 + μ cos 2(φ − φ0)] で fit する（φ0 も自由）。"""
-    edges = np.linspace(0, 180, bins + 1)
+def pair_phi_result(data, labels, bins, edges=None):
+    """組み方を決めた DD の面の方位角 φ_pair の比を A [1 + μ cos 2(φ − φ0)] で fit する（φ0 も自由）。
+
+    edges: ビンの境目 [deg]（増える順で、最後 − 最初 = 180）。None なら 0〜180° を bins 等分。
+    φ_pair は 180° 周期なので、[edges[0], edges[0] + 180) に移してから数える。幅の違うビンは、ビンの中で平均したモデルで fit する。
+    """
+    edges = np.linspace(0, 180, bins + 1) if edges is None else np.asarray(edges, float)
+    if not np.isclose(edges[-1] - edges[0], 180) or np.any(np.diff(edges) <= 0):
+        raise ValueError(f"phi_edges_deg must increase and span 180 deg: {edges.tolist()}")
     centres = 0.5 * (edges[1:] + edges[:-1])
-    hists = [np.histogram(d["phi_pair"][np.isfinite(d["phi_pair"])], bins=edges)[0] for d in data]
+    widths = np.diff(edges)
+    hists = []
+    for d in data:
+        phi = d["phi_pair"][np.isfinite(d["phi_pair"])]
+        hists.append(np.histogram((phi - edges[0]) % 180 + edges[0], bins=edges)[0])
     ratio, error, ok = normalized_ratio(hists[0], hists[1])
-    fit, model = fit_cos2_free_phase(centres[ok], ratio[ok], error[ok])
+    fit, model = fit_cos2_free_phase(centres[ok], ratio[ok], error[ok], widths_deg=widths[ok])
     decided = [{"DD": int(np.sum(d["cls"] == DD)), "decided": int(np.isfinite(d["phi_pair"]).sum())} for d in data]
     result = {"labels": labels, "phi_edges_deg": edges.tolist(), "counts": [h.tolist() for h in hists], "events": decided, "fit": fit}
     return result, (centres, hists, ratio, error, ok, model)
@@ -296,25 +306,27 @@ def pair_phi_result(data, labels, bins):
 def plot_pair_phi(result, plot_data, title, target):
     centres, hists, ratio, error, ok, model = plot_data
     labels, fit = result["labels"], result["fit"]
-    bins = len(centres)
-    half = 90.0 / bins
+    edges = np.array(result["phi_edges_deg"])
+    half = 0.5 * np.diff(edges)
+    lo, hi = edges[0], edges[-1]
     fig, axes = plt.subplots(1, 2, figsize=(15, 5.2), constrained_layout=True)
     ax = axes[0]
     for h, label, color, ev in zip(hists, labels, COLORS, result["events"]):
         n = h.sum()
-        ax.errorbar(centres, h / n * bins, yerr=np.sqrt(h) / n * bins, xerr=half, fmt="o", ms=4, color=color,
+        density = h / n / (2 * half) * 180  # 平均 = 1（幅の違うビンでも、度あたりの割合で比べる）
+        ax.errorbar(centres, density, yerr=density / np.sqrt(np.maximum(h, 1)), xerr=half, fmt="o", ms=4, color=color,
                     label=f"{label}: {ev['decided']:,} of {ev['DD']:,} DD paired")
     ax.set(xlabel="φ_pair [deg]  (pair plane; 0: ∥ X, 90: ∥ Y)", ylabel="normalized (mean = 1)",
-           title="DD with resolved XZ/YZ pairing", xlim=(0, 180))
+           title="DD with resolved XZ/YZ pairing", xlim=(lo, hi))
     ax.legend(fontsize=8, frameon=False)
     ax = axes[1]
-    ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], xerr=half, fmt="o", color="black", ms=4)
-    xx = np.linspace(0, 180, 361)
+    ax.errorbar(centres[ok], ratio[ok], yerr=error[ok], xerr=half[ok], fmt="o", color="black", ms=4)
+    xx = np.linspace(lo, hi, 361)
     ax.plot(xx, model(xx, fit["A"], fit["mu"], fit["phi0_deg"]), color="#e34948",
             label=f"μ = {fit['mu']:.3f} ± {fit['mu_err']:.3f}, φ0 = {fit['phi0_deg']:.0f} ± {fit['phi0_err_deg']:.0f}° "
                   f"({fit['significance_sigma']:.1f}σ vs flat)\nχ²/ndf = {fit['chi2']:.1f}/{fit['ndf']}")
     ax.axhline(1, color="0.6", lw=0.8)
-    ax.set(xlabel="φ_pair [deg]", ylabel="ratio (each normalized)", title=f"{labels[0]} / {labels[1]}: A[1 + μ cos 2(φ − φ0)]", xlim=(0, 180))
+    ax.set(xlabel="φ_pair [deg]", ylabel="ratio (each normalized)", title=f"{labels[0]} / {labels[1]}: A[1 + μ cos 2(φ − φ0)]", xlim=(lo, hi))
     ax.legend(fontsize=8, frameon=False)
     fig.suptitle(title)
     fig.savefig(target, dpi=120)
@@ -393,7 +405,7 @@ def run(pipeline, cut_set_names=None):
                                  "dd_sigma": result["dd_psi_fit"]["significance_sigma"]}
             paired = [int(np.isfinite(d["phi_pair"]).sum()) if "phi_pair" in d else 0 for d in data]
             if pipeline.pairing.get("enabled", False) and min(paired) >= 50:  # 組み方の材料が無い（足りない）サンプルは飛ばす
-                result, plot_data = pair_phi_result(data, labels, pair_settings.get("phi_bins", 12))
+                result, plot_data = pair_phi_result(data, labels, pair_settings.get("phi_bins", 12), pair_settings.get("phi_edges_deg"))
                 (folder / "pair_phi.json").write_text(json.dumps(result, indent=1) + "\n")
                 plot_pair_phi(result, plot_data, title + "  (DD, resolved pairing)", folder / "pair_phi.png")
                 f = result["fit"]

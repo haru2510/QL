@@ -21,7 +21,7 @@
       "two_branch": "投影が『2本』の条件: 2本の角度差 >= min_separation_deg、各枝の Z 幅 >= min_branch_span_mm（短いと1本の曲がった飛跡を2本に割った偽物が入る）、2本に乗った割合 >= min_inlier_fraction。"
     },
     "analysis": {
-      "pair": "対生成の候補（DS・SD・DD）: Q と DD の ψ の比。psi_bins は 0〜90° のビン数。",
+      "pair": "対生成の候補（DS・SD・DD）: Q と DD の ψ の比。psi_bins は 0〜90° のビン数。phi_bins は組み方を決めた DD の φ_pair のビン数（0〜180° の等分）。phi_edges_deg を書くとそちらを使う（増える順、最後 − 最初 = 180°）。0°・90° のまわりは、対の面が X・Y に平行で片方の投影で枝が重なり DD にならず、ほとんど数えられないので、その両側の 15° のビンをまとめて 30° のビン（−15〜15°、75〜105°）にしている。幅の違うビンは、ビンの中で平均したモデルで fit する。",
       "single_track": "1本の飛跡（SS）: θ >= theta_min_deg ごとの φ の比。phi_bins は 0〜360° のビン数。",
       "overview": "全体図: samples を1枚に重ね、reference に対する比を描く（DD の点だけで fit、DS・SD は参考の点）。"
     },
@@ -37,10 +37,10 @@
       "min_r_difference": "（stage3）組み方 A と B の相関の差がこれ以上なら相関で決める。",
       "min_end_difference_mm": "（stage3）相関で決まらず、A と B の『端の Z の差の合計』の違いがこれ以上なら端で決める。"
     },
-    "comparisons": "numerator ÷ denominator の比較。分母は偏光の無い円偏光が基本。同じ偏光同士の比較（系統誤差の確認）も入れる。",
+    "comparisons": "numerator ÷ denominator の比較。分母は偏光の無い円偏光が基本。同じ偏光同士の比較（系統誤差の確認）と、分母の円偏光を1日分（1124 だけ、1126 run03 だけ）にした比較（分母の日による違いの確認）も入れる。",
     "event_display": "stage5 のイベントの絵。cut_sets を省略すると全部の組で描く。pairing_count は、枝の組み方の絵にする DD の件数（相関で組み方が決まったもの、0 なら描かない）。"
   },
-  "name": "20261124-25 UVSOR 6.6 MeV: horizontal / vertical / 45 deg / circular",
+  "name": "20261124-26 UVSOR 6.6 MeV: horizontal / vertical / 45 deg / circular",
   "output_dir": "ETCC_cal/output/pair_analysis/20261124_25",
   "beam_axis_fit": "ETCC_cal/output/20261124_run06_07/with_z0_cut/beam_axis/axis_z0veto.json",
   "run_stages": [0, 1, 2, 3, 4, 5],
@@ -53,14 +53,14 @@
                "20261124_run04", "20261124_run05", "20261124_run06", "20261124_run07"]
     },
     "circular": {
-      "label": "circular 1124 run08-12",
-      "etcc_config": "ETCC_cal/config/20261124_run08_12_circular.json",
-      "runs": ["20261124_run08", "20261124_run09", "20261124_run10", "20261124_run11", "20261124_run12"]
+      "label": "circular 1124 run08-12 + 1126 run03",
+      "etcc_config": "ETCC_cal/config/20261124_26_circular.json",
+      "runs": ["20261124_run08", "20261124_run09", "20261124_run10", "20261124_run11", "20261124_run12", "20261126_run03"]
     },
     "diagonal45": {
-      "label": "45 deg 1125 run06",
-      "etcc_config": "ETCC_cal/config/20261125_run06_45deg.json",
-      "runs": ["20261125_run06"]
+      "label": "45 deg 1125 run06 + 1126 run04",
+      "etcc_config": "ETCC_cal/config/20261125_26_45deg.json",
+      "runs": ["20261125_run06", "20261126_run04"]
     },
     "vertical": {
       "label": "vertical 1125",
@@ -73,6 +73,11 @@
     "horizontal_run00_05": {"dataset": "horizontal", "label": "horizontal run00-05",
                             "runs": ["20261124_run00", "20261124_run01", "20261124_run02", "20261124_run03", "20261124_run04", "20261124_run05"]},
     "horizontal_run06_07": {"dataset": "horizontal", "label": "horizontal run06-07", "runs": ["20261124_run06", "20261124_run07"]},
+    "circular_1124": {"dataset": "circular", "label": "circular 1124 run08-12",
+                      "runs": ["20261124_run08", "20261124_run09", "20261124_run10", "20261124_run11", "20261124_run12"]},
+    "circular_1126": {"dataset": "circular", "label": "circular 1126 run03", "runs": ["20261126_run03"]},
+    "diagonal45_run06": {"dataset": "diagonal45", "label": "45 deg 1125 run06", "runs": ["20261125_run06"]},
+    "diagonal45_run04": {"dataset": "diagonal45", "label": "45 deg 1126 run04", "runs": ["20261126_run04"]},
     "vertical_run00": {"dataset": "vertical", "label": "vertical run00", "runs": ["20261125_run00"]},
     "vertical_run01_05": {"dataset": "vertical", "label": "vertical run01-05",
                           "runs": ["20261125_run01", "20261125_run03", "20261125_run04", "20261125_run05"]}
@@ -111,17 +116,25 @@
   },
 
   "analysis": {
-    "pair": {"enabled": true, "psi_bins": 9, "phi_bins": 12},
+    "pair": {"enabled": true, "psi_bins": 9, "phi_bins": 12, "phi_edges_deg": [-15, 15, 30, 45, 60, 75, 105, 120, 135, 150, 165]},
     "single_track": {"enabled": true, "theta_min_deg": [10.0, 20.0, 30.0], "phi_bins": 18},
     "overview": {"enabled": true, "samples": ["horizontal", "vertical", "diagonal45", "circular"], "reference": "circular"}
   },
 
   "comparisons": [
-    {"name": "horizontal_over_circular", "numerator": "horizontal", "denominator": "circular", "note": "same day (1124)"},
+    {"name": "horizontal_over_circular", "numerator": "horizontal", "denominator": "circular", "note": "circular = 1124 run08-12 + 1126 run03"},
     {"name": "vertical_over_circular", "numerator": "vertical", "denominator": "circular", "note": "different days"},
     {"name": "diagonal45_over_circular", "numerator": "diagonal45", "denominator": "circular", "note": "45 deg: folded ψ should be flat"},
+    {"name": "horizontal_over_circular_1124", "numerator": "horizontal", "denominator": "circular_1124", "note": "denominator check: circular of 1124 only"},
+    {"name": "diagonal45_over_circular_1124", "numerator": "diagonal45", "denominator": "circular_1124", "note": "denominator check: circular of 1124 only"},
+    {"name": "vertical_over_circular_1124", "numerator": "vertical", "denominator": "circular_1124", "note": "denominator check: circular of 1124 only"},
+    {"name": "horizontal_over_circular_1126", "numerator": "horizontal", "denominator": "circular_1126", "note": "denominator check: circular of 1126 run03 only"},
+    {"name": "diagonal45_over_circular_1126", "numerator": "diagonal45", "denominator": "circular_1126", "note": "denominator check: circular of 1126 run03 only"},
+    {"name": "vertical_over_circular_1126", "numerator": "vertical", "denominator": "circular_1126", "note": "denominator check: circular of 1126 run03 only"},
     {"name": "horizontal_over_vertical", "numerator": "horizontal", "denominator": "vertical", "note": "different days, 90 deg apart"},
     {"name": "null_horizontal_run00_05_over_run06_07", "numerator": "horizontal_run00_05", "denominator": "horizontal_run06_07", "note": "same polarization: expect flat"},
+    {"name": "null_circular_1126_over_1124", "numerator": "circular_1126", "denominator": "circular_1124", "note": "same polarization (circular), different days: expect flat"},
+    {"name": "null_diagonal45_run04_over_run06", "numerator": "diagonal45_run04", "denominator": "diagonal45_run06", "note": "same polarization (45 deg), different days: expect flat"},
     {"name": "null_vertical_run00_over_run01_05", "numerator": "vertical_run00", "denominator": "vertical_run01_05", "note": "same polarization: expect flat"}
   ],
 

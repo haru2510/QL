@@ -39,16 +39,26 @@ def fit_cos2_fixed_phase(psi_deg, ratio, error):
             "chi2_flat": chi2_flat, "ndf_flat": len(ratio) - 1, "significance_sigma": sigma, "p_value": p_value}, model
 
 
-def fit_cos2_free_phase(phi_deg, ratio, error):
-    """A [1 + μ cos 2(φ − φ0)]（μ >= 0 にそろえ、φ0 は 0〜180°）。"""
+def fit_cos2_free_phase(phi_deg, ratio, error, widths_deg=None):
+    """A [1 + μ cos 2(φ − φ0)]（μ >= 0 にそろえ、φ0 は 0〜180°）。
+
+    widths_deg を渡すと、各ビンの中で平均したモデル A [1 + μ cos 2(c − φ0) sin w / w]（c = ビンの中心、w = ビン幅 [rad]）で fit する
+    （幅の違うビンを混ぜても μ が偏らない）。返す model は平均する前の曲線。
+    """
     model = lambda x, a, mu, phi0: a * (1 + mu * np.cos(2 * np.radians(x - phi0)))
+    if widths_deg is not None:
+        w = np.radians(np.asarray(widths_deg, float))
+        damping = np.sin(w) / w
+        fit_model = lambda x, a, mu, phi0: a * (1 + mu * damping * np.cos(2 * np.radians(x - phi0)))
+    else:
+        fit_model = model
     best = None
     for start in (0.0, 45.0, 90.0, 135.0):  # 位相の初期値を変えて一番よいものを使う
         try:
-            p, cov = curve_fit(model, phi_deg, ratio, p0=[1.0, 0.05, start], sigma=error, absolute_sigma=True, maxfev=20000)
+            p, cov = curve_fit(fit_model, phi_deg, ratio, p0=[1.0, 0.05, start], sigma=error, absolute_sigma=True, maxfev=20000)
         except RuntimeError:
             continue
-        chi2 = float(np.sum(((ratio - model(phi_deg, *p)) / error) ** 2))
+        chi2 = float(np.sum(((ratio - fit_model(phi_deg, *p)) / error) ** 2))
         if best is None or chi2 < best[2]:
             best = (p, cov, chi2)
     p, cov, chi2 = best
